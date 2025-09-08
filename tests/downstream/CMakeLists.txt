@@ -12,7 +12,7 @@ add_executable(downstream_test main.cpp)
 target_link_libraries(downstream_test PRIVATE {{ project_name }}::{{ project_name }})
 
 # Print info for debugging
-message(STATUS "Found {{ project_name }} version: ${{{ project_name }}_VERSION}")
+message(STATUS "Found {{ project_name }} version: ${{ '{' }}{{ project_name }}_VERSION{{ '}' }}")
 message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
 
 # Enable testing
