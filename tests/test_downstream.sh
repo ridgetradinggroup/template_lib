@@ -84,6 +84,7 @@ for build_type in "${BUILD_TYPES[@]}"; do
             -DCMAKE_BUILD_TYPE="${build_type}" \
             -DBUILD_SHARED_LIBS="${lib_type}" \
             -DCMAKE_INSTALL_PREFIX="${install_dir}" \
+            -DVCPKG_MANIFEST_FEATURES=test \
             -D{{ project_name_upper }}_EXPORT_BUILD_TREE=ON > /dev/null 2>&1; then
             echo "   ✓ Configuration successful"
         else
