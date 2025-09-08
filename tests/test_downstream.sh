@@ -7,7 +7,16 @@
 
 set -e
 
-echo "=== Testing {{ project_name }} downstream compatibility ==="
+echo "=== Testing EndToEndTest downstream compatibility ==="
+
+# Check for vcpkg
+if [ -z "$VCPKG_ROOT" ] || [ ! -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ]; then
+    echo "❌ VCPKG_ROOT not set or vcpkg toolchain file not found"
+    echo "Please set VCPKG_ROOT environment variable to your vcpkg installation"
+    exit 1
+fi
+
+echo "Using vcpkg toolchain: $VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 
 # Colors for output
 RED='\033[0;31m'
@@ -55,7 +64,15 @@ LIBRARY_TYPES=("OFF" "ON")  # BUILD_SHARED_LIBS: OFF=static, ON=shared
 
 # Clean previous tests
 echo "Cleaning previous test builds..."
-cd ..
+# Get to project root directory (script can be run from tests/ or project root)
+if [ -f "CMakeLists.txt" ]; then
+    # Already in project root
+    PROJECT_ROOT="$(pwd)"
+else
+    # Assume we're in tests/ subdirectory
+    cd ..
+    PROJECT_ROOT="$(pwd)"
+fi
 rm -rf build-test-* install-test-*
 
 TOTAL_TESTS=0
@@ -76,7 +93,7 @@ for build_type in "${BUILD_TYPES[@]}"; do
         echo "================================================"
         
         build_dir="build-test-${build_type,,}-${lib_name}"
-        install_dir="${PWD}/install-test-${build_type,,}-${lib_name}"
+        install_dir="${PROJECT_ROOT}/install-test-${build_type,,}-${lib_name}"
         
         # Step 1: Configure the target library 
         echo "1. Configuring the library..."
@@ -85,7 +102,8 @@ for build_type in "${BUILD_TYPES[@]}"; do
             -DBUILD_SHARED_LIBS="${lib_type}" \
             -DCMAKE_INSTALL_PREFIX="${install_dir}" \
             -DVCPKG_MANIFEST_FEATURES=test \
-            -D{{ project_name_upper }}_EXPORT_BUILD_TREE=ON > /dev/null 2>&1; then
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DENDTOENDTEST_EXPORT_BUILD_TREE=ON > /dev/null 2>&1; then
             echo "   ✓ Configuration successful"
         else
             echo -e "   ${RED}✗ Configuration failed${NC}"
@@ -120,8 +138,8 @@ for build_type in "${BUILD_TYPES[@]}"; do
             echo "   ✓ Downstream configuration successful"
         else
             echo -e "   ${RED}✗ Downstream configuration failed${NC}"
-            echo "   Check if {{ project_name }}Config.cmake was installed to ${install_dir}/lib/cmake/{{ project_name }}/"
-            ls -la "${install_dir}/lib/cmake/{{ project_name }}/" 2>/dev/null || echo "   Directory not found!"
+            echo "   Check if EndToEndTestConfig.cmake was installed to ${install_dir}/lib/cmake/EndToEndTest/"
+            ls -la "${install_dir}/lib/cmake/EndToEndTest/" 2>/dev/null || echo "   Directory not found!"
             continue
         fi
         
