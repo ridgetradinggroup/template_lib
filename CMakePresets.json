@@ -1,0 +1,169 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 16,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "debug",
+            "displayName": "Debug Build (GCC)",
+            "description": "Debug build with GCC for development and debugging",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_CXX_FLAGS": "-Wall -Wextra -Wpedantic -g -O0 -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "",
+                "CMAKE_SHARED_LINKER_FLAGS": "",
+		"VCPKG_MANIFEST_FEATURES": "test"
+            }
+        },
+        {
+            "name": "release-g++",
+            "displayName": "Release Build (GCC)",
+            "description": "High-performance release build with GCC optimizations for HFT",
+            "generator": "Ninja", 
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_CXX_FLAGS": "-O3 -DNDEBUG -march=native -mtune=native -flto -ffast-math -funroll-loops -fomit-frame-pointer -finline-functions -fno-stack-protector",
+                "CMAKE_EXE_LINKER_FLAGS": "-flto -Wl,--strip-all",
+                "CMAKE_SHARED_LINKER_FLAGS": "-flto -Wl,--strip-all",
+                "BUILD_TESTING": "OFF"
+            }
+        },
+        {
+            "name": "release-clang++",
+            "displayName": "Release Build (Clang++)",
+            "description": "High-performance release build with Clang++ optimizations for HFT",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_CXX_FLAGS": "-O3 -DNDEBUG -march=native -mtune=native -flto -ffast-math -funroll-loops -fomit-frame-pointer -finline-functions -fno-stack-protector -fno-rtti -fno-exceptions",
+                "CMAKE_EXE_LINKER_FLAGS": "-flto -Wl,--strip-all",
+                "CMAKE_SHARED_LINKER_FLAGS": "-flto -Wl,--strip-all",
+                "BUILD_TESTING": "OFF"
+            }
+        },
+        {
+            "name": "release-icpc",
+            "displayName": "Release Build (Intel Classic Compiler)",
+            "description": "High-performance release build with Intel Classic Compiler (icpc) for HFT",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_COMPILER": "icpc",
+                "CMAKE_C_COMPILER": "icc",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_CXX_FLAGS": "-O3 -DNDEBUG -xHost -ipo -no-prec-div -fp-model fast=2 -fomit-frame-pointer -finline-functions -funroll-loops -fno-stack-protector",
+                "CMAKE_EXE_LINKER_FLAGS": "-ipo -Wl,--strip-all",
+                "CMAKE_SHARED_LINKER_FLAGS": "-ipo -Wl,--strip-all",
+                "BUILD_TESTING": "OFF"
+            }
+        },
+        {
+            "name": "release-icpx",
+            "displayName": "Release Build (Intel oneAPI DPC++/C++ Compiler)",
+            "description": "High-performance release build with Intel oneAPI DPC++/C++ Compiler (icpx) for HFT",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_COMPILER": "icpx",
+                "CMAKE_C_COMPILER": "icx",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_CXX_FLAGS": "-O3 -DNDEBUG -march=native -mtune=native -flto -ffast-math -funroll-loops -fomit-frame-pointer -finline-functions -fno-stack-protector",
+                "CMAKE_EXE_LINKER_FLAGS": "-flto -Wl,--strip-all",
+                "CMAKE_SHARED_LINKER_FLAGS": "-flto -Wl,--strip-all",
+                "BUILD_TESTING": "OFF"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "displayName": "Build Debug",
+            "configurePreset": "debug",
+            "jobs": 0
+        },
+        {
+            "name": "release-g++",
+            "displayName": "Build Release (GCC)",
+            "configurePreset": "release-g++",
+            "jobs": 0
+        },
+        {
+            "name": "release-clang++", 
+            "displayName": "Build Release (Clang++)",
+            "configurePreset": "release-clang++",
+            "jobs": 0
+        },
+        {
+            "name": "release-icpc",
+            "displayName": "Build Release (Intel Classic)",
+            "configurePreset": "release-icpc",
+            "jobs": 0
+        },
+        {
+            "name": "release-icpx",
+            "displayName": "Build Release (Intel oneAPI)",
+            "configurePreset": "release-icpx",
+            "jobs": 0
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "debug",
+            "displayName": "Test Debug",
+            "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release-g++",
+            "displayName": "Test Release (GCC)",
+            "configurePreset": "release-g++",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release-clang++",
+            "displayName": "Test Release (Clang++)",
+            "configurePreset": "release-clang++",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release-icpc",
+            "displayName": "Test Release (Intel Classic)",
+            "configurePreset": "release-icpc",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release-icpx",
+            "displayName": "Test Release (Intel oneAPI)",
+            "configurePreset": "release-icpx",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}

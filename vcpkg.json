@@ -1,0 +1,13 @@
+{
+  "name": "{{ project_name_vcpkg }}",
+  "version": "1.0.0",
+  "description": "{{ project_name }} library",
+  "features": {
+    "test": {
+      "description": "Dependencies for running tests",
+      "dependencies": [
+        "gtest"
+      ]
+    }
+  }
+}
