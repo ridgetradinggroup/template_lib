@@ -24,7 +24,7 @@ protected:
     // Helper to capture stdout
     std::string capture_stdout() {
         std::cout.rdbuf(cout_buffer.rdbuf());
-        {{ namespace_scope }}::print_message();
+        ridge::print_message();
         std::cout.rdbuf(original_cout_buffer);
         return cout_buffer.str();
     }
@@ -33,33 +33,33 @@ protected:
     std::streambuf* original_cout_buffer;
 };
 
-// Test {{ namespace_scope }}::get_message() function
+// Test ridge::get_message() function
 TEST_F({{ project_name_class }}Test, GetMessageReturnsCorrectString) {
-    std::string message = {{ namespace_scope }}::get_message();
+    std::string message = ridge::get_message();
     EXPECT_EQ(message, "Hello, World!");
 }
 
 TEST_F({{ project_name_class }}Test, GetMessageIsNotEmpty) {
-    std::string message = {{ namespace_scope }}::get_message();
+    std::string message = ridge::get_message();
     EXPECT_FALSE(message.empty());
 }
 
 TEST_F({{ project_name_class }}Test, GetMessageHasCorrectLength) {
-    std::string message = {{ namespace_scope }}::get_message();
+    std::string message = ridge::get_message();
     EXPECT_EQ(message.length(), 13); // "Hello, World!" has 13 characters
 }
 
 TEST_F({{ project_name_class }}Test, GetMessageStartsWithHello) {
-    std::string message = {{ namespace_scope }}::get_message();
+    std::string message = ridge::get_message();
     EXPECT_TRUE(message.find("Hello") == 0);
 }
 
 TEST_F({{ project_name_class }}Test, GetMessageEndsWithExclamation) {
-    std::string message = {{ namespace_scope }}::get_message();
+    std::string message = ridge::get_message();
     EXPECT_TRUE(message.back() == '!');
 }
 
-// Test {{ namespace_scope }}::print_message() function
+// Test ridge::print_message() function
 TEST_F({{ project_name_class }}Test, PrintMessageOutputsCorrectString) {
     std::string output = capture_stdout();
     EXPECT_EQ(output, "Hello, World!\n");
@@ -70,7 +70,7 @@ TEST_F({{ project_name_class }}Test, PrintMessageOutputsToStdout) {
     std::stringstream buffer;
     std::cout.rdbuf(buffer.rdbuf());
     
-    {{ namespace_scope }}::print_message();
+    ridge::print_message();
     
     // Restore stdout
     std::cout.rdbuf(original_cout_buffer);
@@ -88,9 +88,9 @@ TEST_F({{ project_name_class }}Test, PrintMessageEndsWithNewline) {
 
 // Multiple call consistency tests
 TEST_F({{ project_name_class }}Test, GetMessageConsistentAcrossMultipleCalls) {
-    std::string first_call = {{ namespace_scope }}::get_message();
-    std::string second_call = {{ namespace_scope }}::get_message();
-    std::string third_call = {{ namespace_scope }}::get_message();
+    std::string first_call = ridge::get_message();
+    std::string second_call = ridge::get_message();
+    std::string third_call = ridge::get_message();
     
     EXPECT_EQ(first_call, second_call);
     EXPECT_EQ(second_call, third_call);
@@ -98,7 +98,7 @@ TEST_F({{ project_name_class }}Test, GetMessageConsistentAcrossMultipleCalls) {
 
 // Integration test
 TEST_F({{ project_name_class }}Test, PrintMessageUsesGetMessage) {
-    std::string expected = {{ namespace_scope }}::get_message() + "\n";
+    std::string expected = ridge::get_message() + "\n";
     std::string actual = capture_stdout();
     EXPECT_EQ(actual, expected);
 }
@@ -109,7 +109,7 @@ TEST_F({{ project_name_class }}Test, GetMessagePerformance) {
     
     // Call get_message many times
     for (int i = 0; i < 10000; ++i) {
-        {{ namespace_scope }}::get_message();
+        ridge::get_message();
     }
     
     auto end = std::chrono::high_resolution_clock::now();
@@ -127,7 +127,7 @@ TEST_F({{ project_name_class }}Test, GetMessageThreadSafety) {
     // Launch multiple threads calling get_message
     for (int i = 0; i < 4; ++i) {
         threads.emplace_back([&results, i]() {
-            results[i] = {{ namespace_scope }}::get_message();
+            results[i] = ridge::get_message();
         });
     }
     

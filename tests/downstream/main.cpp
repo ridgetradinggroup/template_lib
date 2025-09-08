@@ -7,7 +7,7 @@ int main()
 	std::cout << "✓ Successfully linked with {{ project_name }}" << std::endl;
 
 	std::cout << "The App using {{ project_name }}" << std::endl;
-	{{ namespace_scope }}::print_message();
+	ridge::print_message();
 
 	return 0;
 }

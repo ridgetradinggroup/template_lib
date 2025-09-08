@@ -1,6 +1,6 @@
 #include "{{ project_name_underscore }}.h"
 
 int main() {
-    {{ namespace }}::print_message();
+    ridge::print_message();
     return 0;
 }
