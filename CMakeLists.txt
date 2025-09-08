@@ -63,7 +63,7 @@ install(DIRECTORY include/
 # Install export targets
 install(EXPORT {{ project_name_underscore }}Targets
     FILE {{ project_name_underscore }}Targets.cmake
-    NAMESPACE {{ project_name_underscore }}::
+    NAMESPACE {{ namespace_scope }}::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/{{ project_name_underscore }}
 )
 
@@ -134,7 +134,7 @@ option({{ project_name_upper }}_EXPORT_BUILD_TREE "Export {{ project_name_unders
 if({{ project_name_upper }}_EXPORT_BUILD_TREE)
     export(EXPORT {{ project_name_underscore }}Targets
         FILE "${CMAKE_CURRENT_BINARY_DIR}/{{ project_name_underscore }}Targets.cmake"
-        NAMESPACE {{ project_name_underscore }}::
+        NAMESPACE {{ namespace_scope }}::
     )
     export(PACKAGE {{ project_name_underscore }})
 endif()

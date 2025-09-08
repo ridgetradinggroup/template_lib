@@ -9,7 +9,7 @@ find_package({{ project_name }} REQUIRED)
 
 # Create test executable
 add_executable(downstream_test main.cpp)
-target_link_libraries(downstream_test PRIVATE {{ project_name }}::{{ project_name }})
+target_link_libraries(downstream_test PRIVATE {{ namespace_scope }}::{{ project_name }})
 
 # Print info for debugging
 message(STATUS "Found {{ project_name }} version: ${{ '{' }}{{ project_name }}_VERSION{{ '}' }}")

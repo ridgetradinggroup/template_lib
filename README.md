@@ -51,7 +51,7 @@ cmake --install build/release-g++ --prefix /usr/local
 Then in your CMakeLists.txt:
 ```cmake
 find_package({{ project_name }} REQUIRED)
-target_link_libraries(your_target PRIVATE {{ project_name }}::{{ project_name }})
+target_link_libraries(your_target PRIVATE {{ namespace_scope }}::{{ project_name }})
 ```
 
 ### Method 2: Custom Install Location
