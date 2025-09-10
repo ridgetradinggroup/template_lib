@@ -1,0 +1,8 @@
+{
+  "name": "{{ project_name_vcpkg }}-downstream-test",
+  "version": "1.0.0",
+  "description": "Downstream test for {{ project_name }} library",
+  "dependencies": [
+    "{{ project_name_vcpkg }}"
+  ]
+}
