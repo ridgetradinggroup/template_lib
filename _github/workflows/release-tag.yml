@@ -1,0 +1,261 @@
+# ==============================================================================
+# 🏷️ Release Validation - Tag-Based Version Consistency Check
+# ==============================================================================
+# 
+# Purpose: Validates version consistency across CMakeLists.txt, vcpkg.json, and git tags
+# before GitHub creates automatic source tarballs for distribution.
+# 
+# Features:
+# • Robust CMake version extraction via proper configuration and CMakeCache.txt parsing
+# • Support for all vcpkg.json version field variants (version, version-string, version-semver, etc.)
+# • GitHub Actions UI integration with ::error:: annotations and collapsible debug logs
+# • Clean semantic version restriction (v1.0.0 format) - no pre-release suffixes allowed
+# • Production-ready error handling with actionable developer guidance and troubleshooting
+# • Integration with reusable setup-env.yml workflow for consistent environment
+# 
+# Workflow Process:
+# 1. Admin pushes semantic version tag (e.g., v1.0.8) to repository
+# 2. cmake-build job configures project using cmake-build.yml (includes setup-env.yml automatically)
+# 3. validate-release job extracts versions from CMakeCache.txt and vcpkg.json, then compares
+# 4. If validation passes, GitHub automatically creates source tarball
+# 5. Downstream publish.yml workflow can use validated tarball for vcpkg registry
+# 
+# Trigger Pattern:
+# • Only responds to clean semantic version tags: v1.0.0, v2.1.3, etc.
+# • Rejects pre-release tags: v1.0.0-alpha, v1.0.0-beta, v1.0.0-rc1
+# ==============================================================================
+
+name: 🏷️ Release Validation
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+$'  # Only clean versions (v1.0.0), no suffixes for now
+
+jobs:
+  # ==============================================================================
+  # CMake Build Job - Configure Project and Generate CMakeCache.txt
+  # ==============================================================================
+  # Uses reusable cmake-build.yml workflow to configure the project and generate
+  # CMakeCache.txt needed for version extraction. Includes setup-env.yml automatically.
+  cmake-build:
+    name: 🔨 CMake Configure for Version Extraction
+    uses: ./.github/workflows/cmake-build.yml
+    with:
+      compiler: gcc
+      buildType: debug
+      use-setup-env: true
+      enable-ccache-stats: false
+      cmake-args: "-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF -Wno-dev"
+
+  # ==============================================================================
+  # Release Validation Job - Extract and Compare Version Numbers
+  # ==============================================================================
+  # Performs comprehensive version consistency validation across all project files.
+  # Uses CMakeCache.txt from cmake-build job for robust version extraction.
+  validate-release:
+    name: 🏷️ Validate • Release Tag
+    needs: cmake-build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract Tag Version
+        id: tag
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          TAG_WITH_V=${GITHUB_REF#refs/tags/}
+          TAG_VERSION=${TAG_WITH_V#v}
+          echo "TAG_WITH_V=$TAG_WITH_V" >> $GITHUB_ENV
+          echo "TAG_VERSION=$TAG_VERSION" >> $GITHUB_ENV
+
+      - name: Install Python (for vcpkg.json parsing)
+        timeout-minutes: 2
+        run: |
+          # Install Python for vcpkg.json version extraction
+          sudo apt-get update
+          sudo apt-get install -y python3
+
+      - name: Restore Build Directory from CMake Job
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: build-gcc-debug-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
+          restore-keys: |
+            build-gcc-debug-
+            build-gcc-
+
+      - name: Extract CMake Version
+        id: cmake-version
+        run: |
+          echo "::group::Extract CMAKE version from cmake-build job cache"
+          
+          # Verify CMakeCache.txt exists from cmake-build job
+          if [[ ! -f "build/CMakeCache.txt" ]]; then
+            echo "::error::CMakeCache.txt not found in build directory from cmake-build job"
+            echo "❌ CMakeCache.txt not found!"
+            echo ""
+            echo "   The cmake-build job should have created build/CMakeCache.txt"
+            echo "   Check that the cmake-build job completed successfully"
+            echo "   Build directory contents:"
+            ls -la build/ 2>/dev/null || echo "   build/ directory not found"
+            exit 1
+          fi
+          
+          echo "✅ Found CMakeCache.txt from cmake-build job"
+          
+          # Extract PROJECT_VERSION from CMakeCache.txt (robust parsing)
+          CMAKE_VERSION=$(
+              # More robust parsing that handles spaces and edge cases
+              sed -n 's/^PROJECT_VERSION:.*=\(.*\)$/\1/p' build/CMakeCache.txt 2>/dev/null | head -n1 || \
+              sed -n 's/^CMAKE_PROJECT_VERSION:.*=\(.*\)$/\1/p' build/CMakeCache.txt 2>/dev/null | head -n1 || \
+              echo ""
+          )
+          
+          echo "CMAKE_VERSION=$CMAKE_VERSION" >> $GITHUB_ENV
+          echo "cmake-version=$CMAKE_VERSION" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Extract vcpkg.json Version
+        id: vcpkg-version
+        run: |
+          echo "::group::Extract vcpkg.json version using Python"
+          
+          # Create Python script for version extraction with detailed logging
+          cat > extract_vcpkg_version.py << 'EOF'
+import json
+import sys
+import traceback
+from pathlib import Path
+
+def log_info(message):
+    print(f"[INFO] {message}", file=sys.stderr)
+
+def log_warning(message):
+    print(f"[WARNING] {message}", file=sys.stderr)
+
+def log_error(message):
+    print(f"[ERROR] {message}", file=sys.stderr)
+
+def main():
+    try:
+        vcpkg_path = Path('vcpkg.json')
+        log_info(f"Looking for vcpkg.json at: {vcpkg_path}")
+        
+        if not vcpkg_path.exists():
+            log_error("vcpkg.json file not found")
+            return ""
+        
+        log_info("Reading vcpkg.json...")
+        with open(vcpkg_path) as f:
+            data = json.load(f)
+        
+        log_info(f"vcpkg.json keys: {list(data.keys())}")
+        
+        # Check all possible version fields in vcpkg.json
+        version_fields = ['version', 'version-string', 'version-semver', 'version-date']
+        found_version = None
+        
+        for field in version_fields:
+            if field in data and data[field]:
+                found_version = data[field]
+                log_info(f"Found version in '{field}': {found_version}")
+                break
+        
+        if found_version:
+            log_info(f"✅ Successfully extracted version: {found_version}")
+            # Print to stdout for capture
+            print(found_version)
+            return found_version
+        else:
+            log_warning("No version field found in vcpkg.json")
+            log_info(f"Available fields: {list(data.keys())}")
+            return ""
+            
+    except json.JSONDecodeError as e:
+        log_error(f"JSON decode error: {e}")
+        log_error("Failed to parse vcpkg.json")
+        traceback.print_exc(file=sys.stderr)
+        return ""
+    except Exception as e:
+        log_error(f"Unexpected error: {e}")
+        log_error(f"Exception type: {type(e).__name__}")
+        traceback.print_exc(file=sys.stderr)
+        return ""
+
+if __name__ == "__main__":
+    result = main()
+    if not result:
+        log_error("Failed to extract version from vcpkg.json")
+        sys.exit(1)
+EOF
+          
+          # Run Python script and capture version
+          if ! VCPKG_VERSION=$(python3 extract_vcpkg_version.py); then
+            echo "::error::Python vcpkg version extraction script failed"
+            echo "::group::Python script content for debugging"
+            cat extract_vcpkg_version.py
+            echo "::endgroup::"
+            echo "::group::Current vcpkg.json content"
+            cat vcpkg.json || echo "File not readable"
+            echo "::endgroup::"
+            VCPKG_VERSION=""
+          fi
+          echo "::endgroup::"
+          
+          echo "VCPKG_VERSION=$VCPKG_VERSION" >> $GITHUB_ENV
+          echo "vcpkg-version=$VCPKG_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Validate Version Consistency
+        run: |
+          echo "🎯 Version Consistency Check:"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Tag      : $TAG_VERSION"
+          echo "CMake    : $CMAKE_VERSION"  
+          echo "vcpkg    : $VCPKG_VERSION"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          if [ -z "$CMAKE_VERSION" ]; then
+            echo "::error::Failed to extract CMake version from project() declaration"
+            echo "❌ Failed to extract CMake version!"
+            echo ""
+            echo "   Check that ./CMakeLists.txt has 'project(name VERSION x.y.z)' declaration"
+            echo "   The VERSION must be set in the project() command for automatic extraction"
+            exit 1
+          fi
+          
+          if [ -z "$VCPKG_VERSION" ]; then
+            echo "::error::Failed to extract version from vcpkg.json"
+            echo "❌ Failed to extract vcpkg.json version!"
+            echo ""
+            echo "   Check that ./vcpkg.json has a version field such as:"
+            echo "   • \"version\": \"x.y.z\""
+            echo "   • \"version-string\": \"x.y.z\""  
+            echo "   • \"version-semver\": \"x.y.z\""
+            exit 1
+          fi
+          
+          if [ "$CMAKE_VERSION" != "$TAG_VERSION" ] || [ "$VCPKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Version mismatch! Tag=$TAG_VERSION, CMake=$CMAKE_VERSION, vcpkg=$VCPKG_VERSION"
+            echo "❌ Version mismatch!"
+            echo ""
+            echo "   Tag      : $TAG_VERSION"
+            echo "   CMake    : $CMAKE_VERSION"  
+            echo "   vcpkg    : $VCPKG_VERSION"
+            echo ""
+            echo "Please update ./CMakeLists.txt and/or ./vcpkg.json to match tag version."
+            exit 1
+          fi
+          
+          echo "✅ Versions aligned:"
+          echo "   Tag      : $TAG_WITH_V"
+          echo "   CMake    : $CMAKE_VERSION"  
+          echo "   vcpkg    : $VCPKG_VERSION"
+          echo "   Tarball  : https://github.com/${{ github.repository }}/archive/refs/tags/$TAG_WITH_V.tar.gz"
+          echo ""
+          echo "🎉 Release validation passed! GitHub will create the source tarball automatically."

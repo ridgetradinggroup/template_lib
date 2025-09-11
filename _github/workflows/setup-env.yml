@@ -1,0 +1,204 @@
+# ==============================================================================
+# ⚙️ Setup C++ Environment - Highly Reusable Workflow
+# ==============================================================================
+# 
+# Purpose: Sets up a complete C++ development environment for any project
+# 
+# Features:
+# • Multi-compiler support (GCC, Clang with configurable versions)
+# • Optional ccache integration for faster compilation
+# • Optional vcpkg integration for dependency management
+# • Flexible package installation for project-specific needs
+# • Environment variable exports for downstream jobs
+# • Comprehensive caching strategies
+# 
+# Reusability Level: ⭐ HIGHLY REUSABLE
+# - Works with any C++ project regardless of build system
+# - Supports CMake, Make, Meson, Bazel, etc.
+# - Can be used by different repositories and organizations
+# - Used by cmake-build.yml, build-test.yml, and release-tag.yml in this repository
+# 
+# Usage Examples:
+# 
+# Basic usage:
+#   uses: ./.github/workflows/setup-env.yml
+#   with:
+#     compiler: gcc
+# 
+# Advanced usage:
+#   uses: your-org/repo/.github/workflows/setup-env.yml@main
+#   with:
+#     compiler: clang
+#     clang-version: "17"
+#     enable-ccache: true
+#     ccache-size: "2G"
+#     install-vcpkg: true
+#     extra-packages: "valgrind gdb"
+# 
+# Cross-project usage:
+#   uses: ridgetradinggroup/template-lib/.github/workflows/setup-env.yml@main
+#   with:
+#     install-vcpkg: false
+#     extra-packages: "autotools-dev pkg-config"
+# ==============================================================================
+
+name: ⚙️ Setup C++ Environment
+
+on:
+  workflow_call:
+    inputs:
+      compiler:
+        description: 'Compiler to use (gcc or clang)'
+        required: false
+        type: string
+        default: 'gcc'
+      clang-version:
+        description: 'Clang version to use when compiler is clang'
+        required: false
+        type: string
+        default: '15'
+      enable-ccache:
+        description: 'Enable ccache for faster compilation'
+        required: false
+        type: boolean
+        default: true
+      ccache-size:
+        description: 'Maximum ccache size (e.g., 1G, 500M)'
+        required: false
+        type: string
+        default: '1G'
+      install-vcpkg:
+        description: 'Install and setup vcpkg'
+        required: false
+        type: boolean
+        default: true
+      extra-packages:
+        description: 'Additional apt packages to install (space-separated)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  setup:
+    runs-on: ubuntu-22.04  # LTS with better compiler support
+    timeout-minutes: 20
+    
+    # Outputs for downstream jobs to use - enables environment sharing across jobs
+    outputs:
+      compiler-cc: ${{ steps.env-setup.outputs.cc }}
+      compiler-cxx: ${{ steps.env-setup.outputs.cxx }}
+      compiler-ld: ${{ steps.env-setup.outputs.ld }}
+      vcpkg-root: ${{ steps.vcpkg-setup.outputs.vcpkg-root }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Build Tools & Compiler
+        id: env-setup
+        timeout-minutes: 10
+        run: |
+          # ==============================================================================
+          # Install Base Build Tools & Compiler
+          # ==============================================================================
+          echo "Installing base build tools (CMake, Ninja)..."
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+          
+          # ==============================================================================
+          # Install Compiler Toolchain (GCC or Clang)
+          # ==============================================================================
+          if [[ "${{ inputs.compiler }}" == "clang" ]]; then
+            CLANG_VERSION="${{ inputs.clang-version }}"
+            echo "Installing Clang ${CLANG_VERSION} toolchain with LLD linker..."
+            sudo apt-get install -y clang-${CLANG_VERSION} lld-${CLANG_VERSION}
+            
+            # Export compiler paths for downstream jobs
+            echo "cc=clang-${CLANG_VERSION}" >> $GITHUB_OUTPUT
+            echo "cxx=clang++-${CLANG_VERSION}" >> $GITHUB_OUTPUT
+            echo "ld=lld-${CLANG_VERSION}" >> $GITHUB_OUTPUT
+            
+            # Set environment variables for this job
+            echo "CC=clang-${CLANG_VERSION}" >> $GITHUB_ENV
+            echo "CXX=clang++-${CLANG_VERSION}" >> $GITHUB_ENV
+            echo "LD=lld-${CLANG_VERSION}" >> $GITHUB_ENV
+          else
+            echo "Installing GCC 13 toolchain (default)..."
+            sudo apt-get install -y gcc-13 g++-13
+            
+            # Export compiler paths for downstream jobs
+            echo "cc=gcc-13" >> $GITHUB_OUTPUT
+            echo "cxx=g++-13" >> $GITHUB_OUTPUT
+            echo "ld=ld" >> $GITHUB_OUTPUT
+            
+            # Set environment variables for this job
+            echo "CC=gcc-13" >> $GITHUB_ENV
+            echo "CXX=g++-13" >> $GITHUB_ENV
+          fi
+          
+          # ==============================================================================
+          # Install Additional Packages (Project-Specific Dependencies)
+          # ==============================================================================
+          if [[ -n "${{ inputs.extra-packages }}" ]]; then
+            echo "Installing additional packages: ${{ inputs.extra-packages }}"
+            sudo apt-get install -y ${{ inputs.extra-packages }}
+          fi
+          
+          echo "✅ Compiler installation completed"
+
+      - name: Setup ccache (Compiler Cache for Faster Builds)
+        if: inputs.enable-ccache == true
+        run: |
+          # ==============================================================================
+          # Setup ccache - Compiler Cache for Faster Incremental Builds
+          # ==============================================================================
+          echo "Setting up ccache for faster compilation..."
+          sudo apt-get install -y ccache
+          echo "/usr/lib/ccache" >> $GITHUB_PATH
+          ccache --set-config=max_size=${{ inputs.ccache-size }}
+          ccache --zero-stats  # Reset stats for meaningful per-run metrics
+          
+          echo "ccache configured with ${{ inputs.ccache-size }} cache size"
+          echo "✅ ccache setup completed"
+
+      - name: Setup vcpkg (C++ Package Manager)
+        id: vcpkg-setup
+        if: inputs.install-vcpkg == true
+        timeout-minutes: 15
+        uses: microsoft/setup-vcpkg@v1
+        with:
+          vcpkgDirectory: ${{ runner.temp }}/vcpkg
+          vcpkgJsonGlob: vcpkg.json
+
+      - name: Export vcpkg Root Path
+        if: inputs.install-vcpkg == true
+        run: |
+          # ==============================================================================
+          # Export vcpkg Environment for Downstream Jobs
+          # ==============================================================================
+          echo "vcpkg-root=${{ runner.temp }}/vcpkg" >> $GITHUB_OUTPUT
+          echo "VCPKG_ROOT=${{ runner.temp }}/vcpkg" >> $GITHUB_ENV
+
+      - name: Environment Summary
+        run: |
+          echo "🎯 Environment Setup Complete!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Compiler: ${{ inputs.compiler }}"
+          echo "CC: ${CC:-not-set}"
+          echo "CXX: ${CXX:-not-set}"
+          if [[ "${{ inputs.enable-ccache }}" == "true" ]]; then
+            echo "ccache: enabled (max: ${{ inputs.ccache-size }})"
+          else
+            echo "ccache: disabled"
+          fi
+          if [[ "${{ inputs.install-vcpkg }}" == "true" ]]; then
+            echo "vcpkg: ${VCPKG_ROOT:-not-set}"
+          else
+            echo "vcpkg: disabled"  
+          fi
+          if [[ -n "${{ inputs.extra-packages }}" ]]; then
+            echo "Extra packages: ${{ inputs.extra-packages }}"
+          fi
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

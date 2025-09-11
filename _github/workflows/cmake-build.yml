@@ -1,0 +1,278 @@
+# ==============================================================================
+# 🔨 CMake Build - Moderately Reusable Workflow
+# ==============================================================================
+# 
+# Purpose: Complete CMake-based build workflow with flexible configuration
+# 
+# Features:
+# • Support for CMake presets or traditional build types
+# • Flexible compiler configuration (works with setup-env.yml)
+# • Comprehensive caching (vcpkg, ccache, build directories)
+# • Optional ccache statistics reporting
+# • Robust error handling with artifact uploads
+# • Parallel build support with configurable arguments
+# 
+# Reusability Level: 🔨 MODERATELY REUSABLE
+# - Works with any CMake-based C++ project
+# - Supports modern CMake practices (presets, targets, etc.)
+# - Can be used across different repositories using CMake
+# - Compatible with vcpkg, Conan, or other package managers
+# - Used by build-test.yml and release-tag.yml in this repository
+# 
+# Usage Examples:
+# 
+# Basic standalone CMake build:
+#   uses: ./.github/workflows/cmake-build.yml
+#   with:
+#     buildType: release
+# 
+# Optimized with setup-env.yml (recommended):
+#   uses: ./.github/workflows/cmake-build.yml
+#   with:
+#     buildType: release
+#     use-setup-env: true
+# 
+# Advanced with presets and environment setup:
+#   uses: ./.github/workflows/cmake-build.yml
+#   with:
+#     cmake-preset: "release-clang"
+#     build-preset: "release-clang"
+#     compiler: clang
+#     use-setup-env: true
+# 
+# Custom configuration with optimized caching:
+#   uses: your-org/repo/.github/workflows/cmake-build.yml@main
+#   with:
+#     cmake-args: "-DENABLE_TESTING=ON -DENABLE_BENCHMARKS=ON"
+#     build-args: "--parallel 4 --verbose"
+#     enable-ccache-stats: true
+#     use-setup-env: true
+# 
+# Cross-project standalone usage:
+#   uses: ridgetradinggroup/template-lib/.github/workflows/cmake-build.yml@main
+#   with:
+#     buildType: debug
+#     cmake-args: "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+# ==============================================================================
+
+name: 🔨 CMake Build
+
+on:
+  workflow_call:
+    inputs:
+      compiler:
+        description: 'Compiler to use (gcc or clang)'
+        required: false
+        type: string
+        default: 'gcc'
+      buildType:
+        description: 'CMake build type (debug or release)'
+        required: false
+        type: string
+        default: 'debug'
+      cmake-preset:
+        description: 'CMake configure preset to use (overrides buildType if set)'
+        required: false
+        type: string
+        default: ''
+      build-preset:
+        description: 'CMake build preset to use (overrides buildType if set)'
+        required: false
+        type: string
+        default: ''
+      cmake-args:
+        description: 'Additional CMake configure arguments'
+        required: false
+        type: string
+        default: ''
+      build-args:
+        description: 'Additional build arguments (e.g., --parallel)'
+        required: false
+        type: string
+        default: '--parallel'
+      enable-ccache-stats:
+        description: 'Show ccache statistics after build'
+        required: false
+        type: boolean
+        default: true
+      use-setup-env:
+        description: 'Use setup-env.yml for environment (recommended for better caching)'
+        required: false
+        type: boolean
+        default: false
+      
+jobs:
+  # ==============================================================================
+  # Optional Environment Setup Job - Uses Reusable setup-env.yml Workflow
+  # ==============================================================================
+  # When use-setup-env is true, provides optimized environment with better caching.
+  # This job is skipped when cmake-build.yml is used standalone for maximum flexibility.
+  setup-env:
+    if: inputs.use-setup-env == true
+    uses: ./.github/workflows/setup-env.yml
+    with:
+      compiler: ${{ inputs.compiler }}
+      enable-ccache: ${{ inputs.enable-ccache-stats }}
+      ccache-size: '1G'
+      install-vcpkg: true
+
+  build:
+    needs: [setup-env]
+    if: always()  # Run even if setup-env is skipped
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore Environment
+        run: |
+          # ==============================================================================
+          # Restore Compiler Environment (Hybrid Approach)
+          # ==============================================================================
+          # Use setup-env.yml outputs when available, fallback to standalone setup
+          if [[ "${{ inputs.use-setup-env }}" == "true" ]]; then
+            echo "Using environment from setup-env.yml job outputs"
+            echo "CC=${{ needs.setup-env.outputs.compiler-cc }}" >> $GITHUB_ENV
+            echo "CXX=${{ needs.setup-env.outputs.compiler-cxx }}" >> $GITHUB_ENV
+            echo "/usr/lib/ccache" >> $GITHUB_PATH
+            if [[ -n "${{ needs.setup-env.outputs.vcpkg-root }}" ]]; then
+              echo "VCPKG_ROOT=${{ needs.setup-env.outputs.vcpkg-root }}" >> $GITHUB_ENV
+            fi
+          else
+            echo "Using standalone environment setup"
+            if [[ "${{ inputs.compiler }}" == "clang" ]]; then
+              echo "CC=clang-15" >> $GITHUB_ENV
+              echo "CXX=clang++-15" >> $GITHUB_ENV
+            else
+              echo "CC=gcc-13" >> $GITHUB_ENV
+              echo "CXX=g++-13" >> $GITHUB_ENV
+            fi
+            echo "/usr/lib/ccache" >> $GITHUB_PATH
+          fi
+
+      - name: Install Build Tools
+        if: inputs.use-setup-env == false
+        timeout-minutes: 5
+        run: |
+          # ==============================================================================
+          # Install Essential Build Tools (Standalone Mode Only)
+          # ==============================================================================
+          # Skipped when using setup-env.yml since tools are already installed
+          echo "Installing build tools for standalone usage"
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 ccache
+
+      - name: Cache vcpkg Packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/vcpkg/installed
+            ${{ runner.temp }}/vcpkg/buildtrees
+          key: vcpkg-${{ inputs.compiler }}-${{ inputs.buildType }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ inputs.compiler }}-${{ inputs.buildType }}-
+            vcpkg-${{ inputs.compiler }}-
+            vcpkg-
+      
+      - name: Cache ccache (Compiler Cache)
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ inputs.compiler }}-${{ inputs.buildType }}-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}-${{ hashFiles('CMakePresets.json') }}
+          restore-keys: |
+            ccache-${{ inputs.compiler }}-${{ inputs.buildType }}-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}-
+            ccache-${{ inputs.compiler }}-${{ inputs.buildType }}-
+            ccache-${{ inputs.compiler }}-
+      
+      - name: Cache Build Directory
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: build-${{ inputs.compiler }}-${{ inputs.buildType }}-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
+          restore-keys: |
+            build-${{ inputs.compiler }}-${{ inputs.buildType }}-
+            build-${{ inputs.compiler }}-
+
+      - name: Setup vcpkg (Package Manager)
+        if: inputs.use-setup-env == false
+        timeout-minutes: 15
+        uses: microsoft/setup-vcpkg@v1
+        with:
+          vcpkgDirectory: ${{ runner.temp }}/vcpkg
+          vcpkgJsonGlob: vcpkg.json
+
+      - name: Reset ccache Statistics
+        if: inputs.enable-ccache-stats == true
+        run: |
+          # ==============================================================================
+          # Reset ccache Statistics for Meaningful Per-Build Metrics
+          # ==============================================================================
+          ccache --zero-stats
+
+      - name: Configure CMake
+        run: |
+          # ==============================================================================
+          # Configure CMake Project (Presets vs. Traditional)
+          # ==============================================================================
+          if [[ -n "${{ inputs.cmake-preset }}" ]]; then
+            echo "Using CMake configure preset: ${{ inputs.cmake-preset }}"
+            CMAKE_CONFIGURE_CMD="cmake --preset ${{ inputs.cmake-preset }}"
+          else
+            echo "Using traditional CMake build type: ${{ inputs.buildType }}"
+            CMAKE_CONFIGURE_CMD="cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ inputs.buildType }}"
+          fi
+          
+          # Append additional CMake arguments if provided
+          if [[ -n "${{ inputs.cmake-args }}" ]]; then
+            CMAKE_CONFIGURE_CMD="$CMAKE_CONFIGURE_CMD ${{ inputs.cmake-args }}"
+          fi
+          
+          echo "🔧 Running: $CMAKE_CONFIGURE_CMD"
+          eval $CMAKE_CONFIGURE_CMD
+
+      - name: Build Project
+        run: |
+          # ==============================================================================
+          # Build CMake Project (Presets vs. Traditional)
+          # ==============================================================================
+          if [[ -n "${{ inputs.build-preset }}" ]]; then
+            echo "Using explicit CMake build preset: ${{ inputs.build-preset }}"
+            BUILD_CMD="cmake --build --preset ${{ inputs.build-preset }}"
+          elif [[ -n "${{ inputs.cmake-preset }}" ]]; then
+            echo "Using CMake build preset matching configure preset"
+            BUILD_CMD="cmake --build --preset ${{ inputs.cmake-preset }}"
+          else
+            echo "Using traditional CMake build directory"
+            BUILD_CMD="cmake --build build"
+          fi
+          
+          # Append build arguments (parallel, verbose, etc.)
+          if [[ -n "${{ inputs.build-args }}" ]]; then
+            BUILD_CMD="$BUILD_CMD ${{ inputs.build-args }}"
+          fi
+          
+          echo "🔨 Running: $BUILD_CMD"
+          eval $BUILD_CMD
+
+      - name: Show ccache Statistics
+        if: inputs.enable-ccache-stats == true
+        run: |
+          echo "🎯 ccache Statistics After Build:"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          ccache --show-stats
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Upload Build Logs (on failure)
+        if: failure()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-build-logs-${{ inputs.buildType }}-${{ inputs.compiler }}
+          path: |
+            build/**/CMakeFiles/CMakeOutput.log
+            build/**/CMakeFiles/CMakeError.log
+          if-no-files-found: warn

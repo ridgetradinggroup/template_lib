@@ -7,7 +7,7 @@
     },
     "configurePresets": [
         {
-            "name": "debug",
+            "name": "dev",
             "displayName": "Debug Build (GCC)",
             "description": "Debug build with GCC for development and debugging",
             "generator": "Ninja",
@@ -21,6 +21,40 @@
                 "CMAKE_EXE_LINKER_FLAGS": "",
                 "CMAKE_SHARED_LINKER_FLAGS": "",
 		"VCPKG_MANIFEST_FEATURES": "test"
+            }
+        },
+        {
+            "name": "debug",
+            "displayName": "Debug Build (GCC)",
+            "description": "Debug build with GCC for development and debugging",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_COMPILER": "$env{CXX}",
+                "CMAKE_C_COMPILER": "$env{CC}",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_CXX_FLAGS": "-Wall -Wextra -Wpedantic -g -O0 -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "",
+                "CMAKE_SHARED_LINKER_FLAGS": "",
+		"VCPKG_MANIFEST_FEATURES": "test"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release Build (Environment)",
+            "description": "High-performance release build using environment compiler settings",
+            "generator": "Ninja", 
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_COMPILER": "$env{CXX}",
+                "CMAKE_C_COMPILER": "$env{CC}",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_CXX_FLAGS": "-O3 -DNDEBUG -march=native -mtune=native -flto -ffast-math -funroll-loops -fomit-frame-pointer -finline-functions -fno-stack-protector",
+                "CMAKE_EXE_LINKER_FLAGS": "-flto -Wl,--strip-all",
+                "CMAKE_SHARED_LINKER_FLAGS": "-flto -Wl,--strip-all",
+                "BUILD_TESTING": "OFF"
             }
         },
         {
@@ -100,6 +134,12 @@
             "jobs": 0
         },
         {
+            "name": "release",
+            "displayName": "Build Release (Environment)",
+            "configurePreset": "release",
+            "jobs": 0
+        },
+        {
             "name": "release-g++",
             "displayName": "Build Release (GCC)",
             "configurePreset": "release-g++",
@@ -129,6 +169,14 @@
             "name": "debug",
             "displayName": "Test Debug",
             "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Test Release (Environment)",
+            "configurePreset": "release",
             "output": {
                 "outputOnFailure": true
             }

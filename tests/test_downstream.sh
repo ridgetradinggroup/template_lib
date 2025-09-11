@@ -62,6 +62,29 @@ NC='\033[0m' # No Color
 BUILD_TYPES=("Release" "Debug")
 LIBRARY_TYPES=("OFF" "ON")  # BUILD_SHARED_LIBS: OFF=static, ON=shared
 
+# Function to copy logs to standardized directory
+copy_logs_to_standard_dir() {
+    local test_name="$1"
+    local build_dir="$2"
+    local install_dir="$3"
+    
+    # Create standardized log directory
+    mkdir -p downstream-logs
+    
+    # Copy build logs if they exist
+    if [ -d "${build_dir}" ]; then
+        find "${build_dir}" -name "*.log" -exec cp {} downstream-logs/ \; 2>/dev/null || true
+    fi
+    
+    # Copy install logs if they exist  
+    if [ -d "${install_dir}" ]; then
+        find "${install_dir}" -name "*.log" -exec cp {} downstream-logs/ \; 2>/dev/null || true
+    fi
+    
+    # Log the copy operation
+    echo "   ✓ Logs copied to downstream-logs/ for ${test_name}"
+}
+
 # Clean previous tests
 echo "Cleaning previous test builds..."
 # Get to project root directory (script can be run from tests/ or project root)
@@ -73,7 +96,7 @@ else
     cd ..
     PROJECT_ROOT="$(pwd)"
 fi
-rm -rf build-test-* install-test-*
+rm -rf build-test-* install-test-* downstream-logs
 
 TOTAL_TESTS=0
 PASSED_TESTS=0
@@ -170,6 +193,9 @@ for build_type in "${BUILD_TYPES[@]}"; do
         else
             echo -e "${RED}✗ Test FAILED: ${build_type}/${lib_name}${NC}"
         fi
+        
+        # Copy logs to standardized directory for CI artifact collection
+        copy_logs_to_standard_dir "${build_type}/${lib_name}" "${build_dir}" "${install_dir}"
     done
 done
 

@@ -1,0 +1,236 @@
+# ==============================================================================
+# 🚀 Build & Test CI - Main CI/CD Pipeline
+# ==============================================================================
+# 
+# Purpose: Complete CI/CD pipeline for C++ projects with comprehensive testing
+# 
+# Features:
+# • Matrix-based builds (Debug/Release configurations)
+# • Multi-compiler support with reusable workflow orchestration
+# • Comprehensive testing pipeline (unit tests → integration tests)
+# • Advanced caching strategies for faster CI runs
+# • JUnit XML test reporting with GitHub UI integration
+# • Artifact uploads for debugging failures
+# • Downstream compatibility validation
+# 
+# Workflow Architecture:
+# 1. setup → Sets up C++ environment using setup-env.yml
+# 2. build → Compiles project using cmake-build.yml (includes setup-env.yml automatically)
+# 3. unit-tests → Runs Google Test suite using cached build artifacts
+# 4. integration-tests → Validates downstream package consumption
+# 
+# Usage:
+# • Automatically triggers on push and pull_request events
+# • Uses reusable workflows for modularity and maintainability
+# • Optimized for C++ projects using CMake presets and vcpkg
+# • Provides comprehensive test coverage and failure diagnostics
+# ==============================================================================
+
+name: 🚀 Build & Test CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # ==============================================================================
+  # Environment Setup Job - Prepares C++ Toolchain
+  # ==============================================================================
+  # Uses reusable setup-env.yml workflow to establish consistent build environment
+  # across all matrix configurations. Provides compiler toolchain, ccache, and vcpkg.
+  setup:
+    name: ⚙️ Setup • ${{ matrix.buildType == 'debug' && 'Debug' || 'Release' }} • ${{ matrix.compiler == 'gcc' && 'GCC' || 'Clang' }}
+    uses: ./.github/workflows/setup-env.yml
+    with:
+      compiler: ${{ matrix.compiler }}
+      enable-ccache: true
+      ccache-size: '1G'
+      install-vcpkg: true
+    
+    strategy:
+      matrix:
+        buildType: [debug, release]  # Lowercase to match CMakePresets.json preset names
+        compiler: [gcc]  # Multi-compiler support
+
+  # ==============================================================================
+  # Build Job - Compiles C++ Project with CMake
+  # ==============================================================================
+  # Uses reusable cmake-build.yml workflow to handle CMake configuration and build.
+  # Supports both preset-based and traditional CMake workflows with optimizations.
+  build:
+    name: 🔨 Build • ${{ matrix.buildType == 'debug' && 'Debug' || 'Release' }} • ${{ matrix.compiler == 'gcc' && 'GCC' || 'Clang' }}
+    needs: setup
+    uses: ./.github/workflows/cmake-build.yml
+    with:
+      compiler: ${{ matrix.compiler }}
+      buildType: ${{ matrix.buildType }}
+      cmake-preset: ${{ matrix.buildType }}  # Use presets from CMakePresets.json
+      build-preset: ${{ matrix.buildType }}
+      use-setup-env: true  # Use optimized environment from setup job
+    secrets: inherit
+    
+    strategy:
+      matrix:
+        buildType: [debug, release]  # Lowercase to match CMakePresets.json preset names
+        compiler: [gcc]  # Multi-compiler support
+
+  # ==============================================================================
+  # Unit Tests Job - Runs Google Test Suite with JUnit Reporting
+  # ==============================================================================
+  # Executes comprehensive unit tests with matrix strategy across build configurations.
+  # Features JUnit XML generation for GitHub UI integration and artifact uploads.
+  unit-tests:
+    name: 🧪 Tests • ${{ matrix.buildType == 'debug' && 'Debug' || 'Release' }} • ${{ matrix.compiler == 'gcc' && 'GCC' || 'Clang' }}
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    
+    strategy:
+      matrix:
+        buildType: [debug, release]  # Lowercase to match CMakePresets.json preset names
+        compiler: [gcc]  # Multi-compiler support
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache Build Directory
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: build-${{ matrix.compiler }}-${{ matrix.buildType }}-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
+          restore-keys: |
+            build-${{ matrix.compiler }}-${{ matrix.buildType }}-
+            build-${{ matrix.compiler }}-
+
+      - name: Verify Build Artifacts
+        run: |
+          # ==============================================================================
+          # Verify Build Artifacts from Previous Job
+          # ==============================================================================
+          # Check if build artifacts exist from the build job's cache
+          if [[ ! -d "build" ]] || [[ ! -f "build/CMakeCache.txt" ]]; then
+            echo "❌ Build artifacts not found in cache. This suggests the build job failed."
+            echo "   The build directory should be populated by the previous build job."
+            echo "   Check the build job logs for compilation errors."
+            exit 1
+          fi
+          
+          echo "✅ Build artifacts found in cache from build job"
+          echo "Build directory contents:"
+          ls -la build/ || true
+
+      - name: Run Unit Tests
+        run: |
+          # Check if ctest supports --output-junit (CMake 3.21+)
+          if ctest --help | grep -q "output-junit"; then
+            echo "Using JUnit output for better GitHub UI integration"
+            ctest --preset ${{ matrix.buildType }} --output-on-failure --output-junit test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml
+          else
+            echo "CMake version does not support --output-junit, using standard output"
+            ctest --preset ${{ matrix.buildType }} --output-on-failure
+          fi
+        
+      - name: Upload Test Results
+        if: always()  # Upload even on failure for better reporting
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.buildType }}-${{ matrix.compiler }}
+          path: test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml
+          if-no-files-found: ignore  # Don't fail if JUnit XML wasn't generated
+
+      - name: Publish Test Results
+        if: always()  # Publish even on failure for GitHub PR annotations
+        uses: dorny/test-reporter@v1
+        with:
+          name: Unit Tests (${{ matrix.buildType }} - ${{ matrix.compiler }})
+          path: test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml
+          reporter: java-junit
+          fail-on-error: false  # Don't fail workflow if test reporting fails
+
+      - name: Upload Test Logs (on failure)
+        if: failure()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-logs-${{ matrix.buildType }}-${{ matrix.compiler }}
+          path: build/**/Testing/**/*.log
+          if-no-files-found: warn
+
+  # ==============================================================================
+  # Integration Tests Job - Downstream Compatibility Validation
+  # ==============================================================================
+  # Validates that the library can be consumed by downstream projects using find_package().
+  # Tests all 8 configurations (Debug/Release × Static/Shared × 2 build types) to ensure
+  # comprehensive compatibility across different usage patterns and build configurations.
+  integration-tests:
+    name: 🔗 Integration • Debug • GCC
+    needs: [setup, unit-tests]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    
+    env:
+      BUILD_TYPE: debug  # Environment variable for debug-only integration tests (lowercase for consistency)
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore Environment from Setup Job
+        run: |
+          # ==============================================================================
+          # Restore Environment from Setup Job (GCC Debug Only)
+          # ==============================================================================
+          # Integration tests reuse environment from the setup job to eliminate duplication
+          echo "CC=gcc-13" >> $GITHUB_ENV
+          echo "CXX=g++-13" >> $GITHUB_ENV  
+          echo "/usr/lib/ccache" >> $GITHUB_PATH
+
+      - name: Install Build Tools (Quick)
+        timeout-minutes: 5
+        run: |
+          # ==============================================================================
+          # Install Essential Tools (Lightweight Installation)
+          # ==============================================================================
+          # Quick install leveraging apt cache from previous jobs
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 ccache
+
+      - name: Cache vcpkg Packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/vcpkg/installed
+            ${{ runner.temp }}/vcpkg/buildtrees
+          key: vcpkg-gcc-debug-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-gcc-debug-
+            vcpkg-gcc-
+            vcpkg-
+
+      - name: Setup vcpkg
+        timeout-minutes: 15
+        uses: microsoft/setup-vcpkg@v1
+        with:
+          vcpkgDirectory: ${{ runner.temp }}/vcpkg
+          vcpkgJsonGlob: vcpkg.json
+
+      - name: Run Downstream Compatibility Tests (Debug only)
+        run: |
+          echo "Running integration tests with BUILD_TYPE: $BUILD_TYPE"
+          echo "Integration tests use debug configuration for comprehensive downstream validation"
+          chmod +x tests/test_downstream.sh
+          ./tests/test_downstream.sh
+
+      - name: Upload Downstream Logs (on failure)
+        if: failure()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v4
+        with:
+          name: downstream-test-logs-debug
+          path: downstream-logs/**/*.log
+          if-no-files-found: warn
