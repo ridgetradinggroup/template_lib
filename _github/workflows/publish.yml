@@ -123,7 +123,7 @@ jobs:
 
       - name: Setup vcpkg (C++ Package Manager)
         timeout-minutes: 15
-        uses: microsoft/setup-vcpkg@v1
+        uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
           vcpkgJsonGlob: source_extracted/vcpkg.json

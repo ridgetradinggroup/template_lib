@@ -91,19 +91,22 @@ jobs:
       vcpkg-root: ${{ steps.vcpkg-setup.outputs.vcpkg-root }}
 
     steps:
+      # Checkout source code with full history for comprehensive environment setup
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Full history needed for version detection and git operations
 
+      # Install essential build tools and configure compiler toolchain
+      # Supports both GCC and Clang with version-specific installation
       - name: Install Build Tools & Compiler
         id: env-setup
         timeout-minutes: 10
         run: |
           # ==============================================================================
-          # Install Base Build Tools & Compiler
+          # Install Base Build Tools & Compiler Toolchain
           # ==============================================================================
-          echo "Installing base build tools (CMake, Ninja)..."
+          echo "Installing essential build tools (CMake, Ninja Build System)..."
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build
           
@@ -167,7 +170,7 @@ jobs:
         id: vcpkg-setup
         if: inputs.install-vcpkg == true
         timeout-minutes: 15
-        uses: microsoft/setup-vcpkg@v1
+        uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
           vcpkgJsonGlob: vcpkg.json

@@ -21,34 +21,26 @@
 # 
 # Usage Examples:
 # 
-# Basic standalone CMake build:
+# Basic CMake build:
 #   uses: ./.github/workflows/cmake-build.yml
 #   with:
 #     buildType: release
 # 
-# Optimized with setup-env.yml (recommended):
-#   uses: ./.github/workflows/cmake-build.yml
-#   with:
-#     buildType: release
-#     use-setup-env: true
-# 
-# Advanced with presets and environment setup:
+# Advanced with presets:
 #   uses: ./.github/workflows/cmake-build.yml
 #   with:
 #     cmake-preset: "release-clang"
 #     build-preset: "release-clang"
 #     compiler: clang
-#     use-setup-env: true
 # 
-# Custom configuration with optimized caching:
+# Custom configuration:
 #   uses: your-org/repo/.github/workflows/cmake-build.yml@main
 #   with:
 #     cmake-args: "-DENABLE_TESTING=ON -DENABLE_BENCHMARKS=ON"
 #     build-args: "--parallel 4 --verbose"
 #     enable-ccache-stats: true
-#     use-setup-env: true
 # 
-# Cross-project standalone usage:
+# Cross-project usage:
 #   uses: ridgetradinggroup/template-lib/.github/workflows/cmake-build.yml@main
 #   with:
 #     buildType: debug
@@ -95,77 +87,54 @@ on:
         required: false
         type: boolean
         default: true
-      use-setup-env:
-        description: 'Use setup-env.yml for environment (recommended for better caching)'
-        required: false
-        type: boolean
-        default: false
       
 jobs:
-  # ==============================================================================
-  # Optional Environment Setup Job - Uses Reusable setup-env.yml Workflow
-  # ==============================================================================
-  # When use-setup-env is true, provides optimized environment with better caching.
-  # This job is skipped when cmake-build.yml is used standalone for maximum flexibility.
-  setup-env:
-    if: inputs.use-setup-env == true
-    uses: ./.github/workflows/setup-env.yml
-    with:
-      compiler: ${{ inputs.compiler }}
-      enable-ccache: ${{ inputs.enable-ccache-stats }}
-      ccache-size: '1G'
-      install-vcpkg: true
-
   build:
-    needs: [setup-env]
-    if: always()  # Run even if setup-env is skipped
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     
     steps:
+      # Checkout source code with full history for comprehensive build operations
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Full history needed for version extraction and git operations
 
-      - name: Restore Environment
+      # Configure compiler environment based on input parameter
+      # Supports both GCC and Clang with version-specific compiler paths
+      - name: Setup Environment
         run: |
           # ==============================================================================
-          # Restore Compiler Environment (Hybrid Approach)
+          # Setup Compiler Environment
           # ==============================================================================
-          # Use setup-env.yml outputs when available, fallback to standalone setup
-          if [[ "${{ inputs.use-setup-env }}" == "true" ]]; then
-            echo "Using environment from setup-env.yml job outputs"
-            echo "CC=${{ needs.setup-env.outputs.compiler-cc }}" >> $GITHUB_ENV
-            echo "CXX=${{ needs.setup-env.outputs.compiler-cxx }}" >> $GITHUB_ENV
-            echo "/usr/lib/ccache" >> $GITHUB_PATH
-            if [[ -n "${{ needs.setup-env.outputs.vcpkg-root }}" ]]; then
-              echo "VCPKG_ROOT=${{ needs.setup-env.outputs.vcpkg-root }}" >> $GITHUB_ENV
-            fi
+          # Configure compiler toolchain based on input parameter
+          if [[ "${{ inputs.compiler }}" == "clang" ]]; then
+            echo "Setting up Clang 15 compiler toolchain"
+            echo "CC=clang-15" >> $GITHUB_ENV
+            echo "CXX=clang++-15" >> $GITHUB_ENV
           else
-            echo "Using standalone environment setup"
-            if [[ "${{ inputs.compiler }}" == "clang" ]]; then
-              echo "CC=clang-15" >> $GITHUB_ENV
-              echo "CXX=clang++-15" >> $GITHUB_ENV
-            else
-              echo "CC=gcc-13" >> $GITHUB_ENV
-              echo "CXX=g++-13" >> $GITHUB_ENV
-            fi
-            echo "/usr/lib/ccache" >> $GITHUB_PATH
+            echo "Setting up GCC 13 compiler toolchain"
+            echo "CC=gcc-13" >> $GITHUB_ENV
+            echo "CXX=g++-13" >> $GITHUB_ENV
           fi
+          # Enable ccache for faster compilation by adding to PATH
+          echo "/usr/lib/ccache" >> $GITHUB_PATH
 
+      # Install essential build tools and compiler toolchain
+      # Uses apt package manager with timeout protection
       - name: Install Build Tools
-        if: inputs.use-setup-env == false
         timeout-minutes: 5
         run: |
           # ==============================================================================
-          # Install Essential Build Tools (Standalone Mode Only)
+          # Install Essential Build Tools and Compilers
           # ==============================================================================
-          # Skipped when using setup-env.yml since tools are already installed
-          echo "Installing build tools for standalone usage"
+          # Install core build tools required for CMake operations
+          echo "Installing essential build tools and compiler toolchain"
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build gcc-13 g++-13 ccache
 
+      # Cache vcpkg packages to speed up dependency installation
+      # Uses content-based cache keys for vcpkg manifest files
       - name: Cache vcpkg Packages
         uses: actions/cache@v4
         with:
@@ -178,6 +147,8 @@ jobs:
             vcpkg-${{ inputs.compiler }}-
             vcpkg-
       
+      # Cache ccache data for faster incremental compilation
+      # Uses branch-based cache keys for optimal cache hit rates across PRs
       - name: Cache ccache (Compiler Cache)
         uses: actions/cache@v4
         with:
@@ -188,6 +159,8 @@ jobs:
             ccache-${{ inputs.compiler }}-${{ inputs.buildType }}-
             ccache-${{ inputs.compiler }}-
       
+      # Cache CMake build directory for faster subsequent builds
+      # Essential for preserving build artifacts between jobs
       - name: Cache Build Directory
         uses: actions/cache@v4
         with:
@@ -197,27 +170,34 @@ jobs:
             build-${{ inputs.compiler }}-${{ inputs.buildType }}-
             build-${{ inputs.compiler }}-
 
+      # Setup vcpkg package manager for dependency management
+      # Uses custom composite action for reliable vcpkg installation
       - name: Setup vcpkg (Package Manager)
-        if: inputs.use-setup-env == false
         timeout-minutes: 15
-        uses: microsoft/setup-vcpkg@v1
+        uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
           vcpkgJsonGlob: vcpkg.json
 
+      # Reset ccache statistics to measure per-build performance
+      # Only runs when ccache statistics reporting is enabled
       - name: Reset ccache Statistics
         if: inputs.enable-ccache-stats == true
         run: |
           # ==============================================================================
           # Reset ccache Statistics for Meaningful Per-Build Metrics
           # ==============================================================================
+          echo "Resetting ccache statistics for accurate per-build measurements"
           ccache --zero-stats
 
+      # Configure CMake project with support for presets or traditional builds
+      # Handles both modern CMake presets and traditional build type approaches
       - name: Configure CMake
         run: |
           # ==============================================================================
           # Configure CMake Project (Presets vs. Traditional)
           # ==============================================================================
+          # Determine configuration approach based on input parameters
           if [[ -n "${{ inputs.cmake-preset }}" ]]; then
             echo "Using CMake configure preset: ${{ inputs.cmake-preset }}"
             CMAKE_CONFIGURE_CMD="cmake --preset ${{ inputs.cmake-preset }}"
@@ -226,19 +206,22 @@ jobs:
             CMAKE_CONFIGURE_CMD="cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ inputs.buildType }}"
           fi
           
-          # Append additional CMake arguments if provided
+          # Append additional CMake arguments if provided by user
           if [[ -n "${{ inputs.cmake-args }}" ]]; then
             CMAKE_CONFIGURE_CMD="$CMAKE_CONFIGURE_CMD ${{ inputs.cmake-args }}"
           fi
           
-          echo "🔧 Running: $CMAKE_CONFIGURE_CMD"
+          echo "🔧 Executing CMake configuration: $CMAKE_CONFIGURE_CMD"
           eval $CMAKE_CONFIGURE_CMD
 
+      # Build the configured CMake project with appropriate build command
+      # Supports both preset-based and traditional build approaches
       - name: Build Project
         run: |
           # ==============================================================================
           # Build CMake Project (Presets vs. Traditional)
           # ==============================================================================
+          # Determine build approach based on configuration method used
           if [[ -n "${{ inputs.build-preset }}" ]]; then
             echo "Using explicit CMake build preset: ${{ inputs.build-preset }}"
             BUILD_CMD="cmake --build --preset ${{ inputs.build-preset }}"
@@ -246,26 +229,33 @@ jobs:
             echo "Using CMake build preset matching configure preset"
             BUILD_CMD="cmake --build --preset ${{ inputs.cmake-preset }}"
           else
-            echo "Using traditional CMake build directory"
+            echo "Using traditional CMake build directory approach"
             BUILD_CMD="cmake --build build"
           fi
           
-          # Append build arguments (parallel, verbose, etc.)
+          # Append build arguments for parallelism and verbosity control
           if [[ -n "${{ inputs.build-args }}" ]]; then
             BUILD_CMD="$BUILD_CMD ${{ inputs.build-args }}"
           fi
           
-          echo "🔨 Running: $BUILD_CMD"
+          echo "🔨 Executing CMake build: $BUILD_CMD"
           eval $BUILD_CMD
 
+      # Display ccache performance statistics for build optimization insights
+      # Only runs when statistics reporting is enabled via input parameter
       - name: Show ccache Statistics
         if: inputs.enable-ccache-stats == true
         run: |
+          # ==============================================================================
+          # Display ccache Performance Statistics
+          # ==============================================================================
           echo "🎯 ccache Statistics After Build:"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           ccache --show-stats
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+      # Upload CMake build logs for debugging build failures
+      # Only uploads on failure to conserve artifact storage space
       - name: Upload Build Logs (on failure)
         if: failure()
         timeout-minutes: 5

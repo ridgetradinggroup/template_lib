@@ -44,7 +44,6 @@ jobs:
     with:
       compiler: gcc
       buildType: debug
-      use-setup-env: true
       enable-ccache-stats: false
       cmake-args: "-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF -Wno-dev"
 

@@ -66,7 +66,6 @@ jobs:
       buildType: ${{ matrix.buildType }}
       cmake-preset: ${{ matrix.buildType }}  # Use presets from CMakePresets.json
       build-preset: ${{ matrix.buildType }}
-      use-setup-env: true  # Use optimized environment from setup job
     secrets: inherit
     
     strategy:
@@ -91,11 +90,14 @@ jobs:
         compiler: [gcc]  # Multi-compiler support
 
     steps:
+      # Checkout source code with full history for comprehensive testing
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Full history needed for proper git operations
 
+      # Restore cached build directory from the build job
+      # Uses branch-based cache keys for optimal cache hit rates
       - name: Cache Build Directory
         uses: actions/cache@v4
         with:
@@ -105,6 +107,8 @@ jobs:
             build-${{ matrix.compiler }}-${{ matrix.buildType }}-
             build-${{ matrix.compiler }}-
 
+      # Verify that build artifacts exist from the previous build job
+      # This ensures the build completed successfully before running tests
       - name: Verify Build Artifacts
         run: |
           # ==============================================================================
@@ -122,9 +126,14 @@ jobs:
           echo "Build directory contents:"
           ls -la build/ || true
 
+      # Execute unit tests using ctest with matrix configuration
+      # Supports both JUnit XML output (CMake 3.21+) and standard output
       - name: Run Unit Tests
         run: |
-          # Check if ctest supports --output-junit (CMake 3.21+)
+          # ==============================================================================
+          # Execute Unit Tests with Comprehensive Reporting
+          # ==============================================================================
+          # Check if ctest supports --output-junit for better GitHub integration
           if ctest --help | grep -q "output-junit"; then
             echo "Using JUnit output for better GitHub UI integration"
             ctest --preset ${{ matrix.buildType }} --output-on-failure --output-junit test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml
@@ -133,6 +142,8 @@ jobs:
             ctest --preset ${{ matrix.buildType }} --output-on-failure
           fi
         
+      # Upload JUnit XML test results for GitHub UI integration
+      # Always runs to capture results even on test failures
       - name: Upload Test Results
         if: always()  # Upload even on failure for better reporting
         uses: actions/upload-artifact@v4
@@ -141,6 +152,8 @@ jobs:
           path: test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml
           if-no-files-found: ignore  # Don't fail if JUnit XML wasn't generated
 
+      # Publish test results to GitHub PR with annotations and summary
+      # Provides rich test reporting directly in the GitHub UI
       - name: Publish Test Results
         if: always()  # Publish even on failure for GitHub PR annotations
         uses: dorny/test-reporter@v1
@@ -150,6 +163,8 @@ jobs:
           reporter: java-junit
           fail-on-error: false  # Don't fail workflow if test reporting fails
 
+      # Upload detailed test logs for debugging failed tests
+      # Only uploads on failure to reduce artifact storage usage
       - name: Upload Test Logs (on failure)
         if: failure()
         timeout-minutes: 5
@@ -175,11 +190,14 @@ jobs:
       BUILD_TYPE: debug  # Environment variable for debug-only integration tests (lowercase for consistency)
 
     steps:
+      # Checkout source code with full history for integration testing
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Full history needed for comprehensive integration tests
 
+      # Setup compiler environment for integration tests (GCC debug only)
+      # Integration tests require a separate environment setup due to extensive rebuilding
       - name: Restore Environment from Setup Job
         run: |
           # ==============================================================================
@@ -190,6 +208,8 @@ jobs:
           echo "CXX=g++-13" >> $GITHUB_ENV  
           echo "/usr/lib/ccache" >> $GITHUB_PATH
 
+      # Install essential build tools for integration testing
+      # Quick installation leveraging apt cache from previous jobs
       - name: Install Build Tools (Quick)
         timeout-minutes: 5
         run: |
@@ -200,6 +220,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build gcc-13 g++-13 ccache
 
+      # Cache vcpkg packages specifically for integration tests
+      # Uses dedicated cache key for debug configuration
       - name: Cache vcpkg Packages
         uses: actions/cache@v4
         with:
@@ -212,20 +234,29 @@ jobs:
             vcpkg-gcc-
             vcpkg-
 
+      # Setup vcpkg for downstream compatibility testing
+      # Integration tests require vcpkg to test package consumption scenarios
       - name: Setup vcpkg
         timeout-minutes: 15
-        uses: microsoft/setup-vcpkg@v1
+        uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
           vcpkgJsonGlob: vcpkg.json
 
+      # Execute comprehensive downstream compatibility tests
+      # Tests all 8 configurations: Debug/Release × Static/Shared × 2 build types
       - name: Run Downstream Compatibility Tests (Debug only)
         run: |
+          # ==============================================================================
+          # Execute Comprehensive Downstream Compatibility Testing
+          # ==============================================================================
           echo "Running integration tests with BUILD_TYPE: $BUILD_TYPE"
           echo "Integration tests use debug configuration for comprehensive downstream validation"
           chmod +x tests/test_downstream.sh
           ./tests/test_downstream.sh
 
+      # Upload integration test logs for debugging failures
+      # Only uploads on failure to conserve artifact storage space
       - name: Upload Downstream Logs (on failure)
         if: failure()
         timeout-minutes: 5
