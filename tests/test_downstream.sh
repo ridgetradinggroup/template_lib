@@ -7,6 +7,55 @@
 
 set -e
 
+# ==============================================================================
+# Smart Cleanup System - Hybrid approach for local/CI environments
+# ==============================================================================
+# Cleanup function with smart conditions:
+# • In CI: Never cleanup (preserve logs for workflow artifacts)
+# • Locally on success: Auto-cleanup to keep workspace clean
+# • Locally on failure: Preserve logs for investigation
+# • Manual override: --cleanup flag forces cleanup regardless
+cleanup_if_appropriate() {
+    local exit_code=$?
+    
+    # Check if cleanup flag was passed
+    if [[ "$FORCE_CLEANUP" == "true" ]]; then
+        echo "🧹 Force cleanup requested..."
+        rm -rf build-test* install-test* downstream-logs
+        echo "✅ Forced cleanup completed"
+        return
+    fi
+    
+    # Don't cleanup in GitHub Actions - let workflow handle artifacts  
+    if [[ -n "$GITHUB_ACTIONS" ]]; then
+        echo "ℹ️  Running in CI - preserving logs for workflow artifacts"
+        return
+    fi
+    
+    # Only cleanup locally when tests PASSED
+    if [[ $exit_code -eq 0 ]]; then
+        echo "🧹 All tests passed - cleaning up local artifacts..."
+        rm -rf build-test* install-test* downstream-logs
+        echo "✅ Local cleanup completed"
+    else
+        echo "❌ Tests failed - preserving logs for investigation:"
+        echo "   • build-test-* directories contain build logs"
+        echo "   • install-test-* directories contain install logs" 
+        echo "   • downstream-logs/ contains collected log files"
+        echo "   Run with --cleanup flag to force cleanup"
+    fi
+}
+
+# Check for cleanup flag
+FORCE_CLEANUP="false"
+if [[ "$1" == "--cleanup" || "$1" == "-c" ]]; then
+    FORCE_CLEANUP="true"
+    echo "🗑️  Force cleanup mode enabled"
+fi
+
+# Set trap for smart cleanup
+trap cleanup_if_appropriate EXIT
+
 echo "=== Testing EndToEndTest downstream compatibility ==="
 
 # Check for vcpkg
@@ -23,40 +72,6 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
-
-# Create test downstream project if it doesn't exist
-# COMMENTED OUT - uncomment to overwrite tests/downstream/**
-#mkdir -p tests/downstream
-#
-#cat > tests/downstream/CMakeLists.txt << 'EOF'
-#cmake_minimum_required(VERSION 3.16)
-#project(DownstreamTest VERSION 1.0.0 LANGUAGES CXX)
-#
-#set(CMAKE_CXX_STANDARD 23)
-#set(CMAKE_CXX_STANDARD_REQUIRED ON)
-#
-#find_package(hello REQUIRED)
-#
-#add_executable(downstream_test main.cpp)
-#target_link_libraries(downstream_test PRIVATE hello::hello)
-#
-## Print info for debugging
-#message(STATUS "Found hello version: ${hello_VERSION}")
-#message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
-#EOF
-#
-#cat > tests/downstream/main.cpp << 'EOF'
-##include <iostream>
-#
-## Since we don't know the exact API of libhello, we just test linking
-## In a real test, you'd include <hello/hello.h> and call actual functions
-#
-#int main() {
-#    std::cout << "✓ Downstream test executable runs successfully!" << std::endl;
-#    std::cout << "✓ Successfully linked with libhello" << std::endl;
-#    return 0;
-#}
-#EOF
 
 # Test configurations
 BUILD_TYPES=("Release" "Debug")

@@ -15,6 +15,11 @@ out/
 # vcpkg
 vcpkg_installed*/
 
+# test_downstream.sh generated directories
+build-test*/
+install-test*/
+downstream-logs/
+
 # Visual Studio built-in CMake configuration
 /CMakeSettings.json
 # CLion project configuration
