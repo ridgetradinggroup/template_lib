@@ -1,0 +1,172 @@
+# ==============================================================================
+# ⚙️ Setup C++ Environment - Highly Reusable Composite Action
+# ==============================================================================
+# 
+# Purpose: Sets up a complete C++ development environment for any project
+# 
+# Features:
+# • Multi-compiler support (GCC, Clang with configurable versions)
+# • Optional ccache integration for faster compilation
+# • Optional vcpkg integration for dependency management
+# • Flexible package installation for project-specific needs
+# • Environment variable exports for the current job
+# • Comprehensive build tool verification
+# 
+# Reusability Level: ⭐ HIGHLY REUSABLE
+# - Works with any C++ project regardless of build system
+# - Supports CMake, Make, Meson, Bazel, etc.
+# - Can be used by different repositories and organizations
+# - Used by multiple workflows in this repository
+# 
+# Usage Examples:
+# 
+# Basic usage:
+#   uses: ./.github/actions/setup-env
+#   with:
+#     compiler: gcc
+# 
+# Advanced usage:
+#   uses: ./.github/actions/setup-env
+#   with:
+#     compiler: clang
+#     clang-version: "17"
+#     enable-ccache: true
+#     ccache-size: "2G"
+#     install-vcpkg: true
+#     extra-packages: "valgrind gdb"
+# 
+# Cross-project usage:
+#   uses: ridgetradinggroup/template-lib/.github/actions/setup-env@main
+#   with:
+#     install-vcpkg: false
+#     extra-packages: "autotools-dev pkg-config"
+# ==============================================================================
+
+name: '⚙️ Setup C++ Environment'
+description: 'Sets up complete C++ development environment with compiler, build tools, and optional vcpkg'
+
+inputs:
+  compiler:
+    description: 'Compiler to use (gcc or clang)'
+    required: false
+    default: 'gcc'
+  clang-version:
+    description: 'Clang version to use when compiler is clang'
+    required: false
+    default: '15'
+  enable-ccache:
+    description: 'Enable ccache for faster compilation'
+    required: false
+    default: 'true'
+  ccache-size:
+    description: 'Maximum ccache size (e.g., 1G, 500M)'
+    required: false
+    default: '1G'
+  extra-packages:
+    description: 'Additional apt packages to install (space-separated)'
+    required: false
+    default: ''
+
+outputs:
+  compiler-cc:
+    description: 'C compiler path'
+    value: ${{ steps.env-setup.outputs.cc }}
+  compiler-cxx:
+    description: 'C++ compiler path'
+    value: ${{ steps.env-setup.outputs.cxx }}
+  compiler-ld:
+    description: 'Linker path'
+    value: ${{ steps.env-setup.outputs.ld }}
+
+runs:
+  using: 'composite'
+  steps:
+    # Install essential build tools and configure compiler toolchain
+    # Supports both GCC and Clang with version-specific installation
+    - name: Install Build Tools & Compiler
+      id: env-setup
+      shell: bash
+      run: |
+        # ==============================================================================
+        # Install Base Build Tools & Compiler Toolchain
+        # ==============================================================================
+        echo "Installing essential build tools (CMake, Ninja Build System)..."
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build
+        
+        # ==============================================================================
+        # Install Compiler Toolchain (GCC or Clang)
+        # ==============================================================================
+        if [[ "${{ inputs.compiler }}" == "clang" ]]; then
+          CLANG_VERSION="${{ inputs.clang-version }}"
+          echo "Installing Clang ${CLANG_VERSION} toolchain with LLD linker..."
+          sudo apt-get install -y clang-${CLANG_VERSION} lld-${CLANG_VERSION}
+          
+          # Export compiler paths for outputs
+          echo "cc=clang-${CLANG_VERSION}" >> $GITHUB_OUTPUT
+          echo "cxx=clang++-${CLANG_VERSION}" >> $GITHUB_OUTPUT
+          echo "ld=lld-${CLANG_VERSION}" >> $GITHUB_OUTPUT
+          
+          # Set environment variables for this job
+          echo "CC=clang-${CLANG_VERSION}" >> $GITHUB_ENV
+          echo "CXX=clang++-${CLANG_VERSION}" >> $GITHUB_ENV
+          echo "LD=lld-${CLANG_VERSION}" >> $GITHUB_ENV
+        else
+          echo "Installing GCC 12 toolchain (default for Ubuntu 22.04)..."
+          sudo apt-get install -y gcc-12 g++-12
+          
+          # Export compiler paths for outputs
+          echo "cc=gcc-12" >> $GITHUB_OUTPUT
+          echo "cxx=g++-12" >> $GITHUB_OUTPUT
+          echo "ld=ld" >> $GITHUB_OUTPUT
+          
+          # Set environment variables for this job
+          echo "CC=gcc-12" >> $GITHUB_ENV
+          echo "CXX=g++-12" >> $GITHUB_ENV
+        fi
+        
+        # ==============================================================================
+        # Install Additional Packages (Project-Specific Dependencies)
+        # ==============================================================================
+        if [[ -n "${{ inputs.extra-packages }}" ]]; then
+          echo "Installing additional packages: ${{ inputs.extra-packages }}"
+          sudo apt-get install -y ${{ inputs.extra-packages }}
+        fi
+        
+        echo "✅ Compiler installation completed"
+
+    - name: Setup ccache (Compiler Cache for Faster Builds)
+      if: inputs.enable-ccache == 'true'
+      shell: bash
+      run: |
+        # ==============================================================================
+        # Setup ccache - Compiler Cache for Faster Incremental Builds
+        # ==============================================================================
+        echo "Setting up ccache for faster compilation..."
+        sudo apt-get install -y ccache
+        echo "/usr/lib/ccache" >> $GITHUB_PATH
+        ccache --set-config=max_size=${{ inputs.ccache-size }}
+        ccache --zero-stats  # Reset stats for meaningful per-run metrics
+        
+        echo "ccache configured with ${{ inputs.ccache-size }} cache size"
+        echo "✅ ccache setup completed"
+
+
+
+    - name: Environment Summary
+      shell: bash
+      run: |
+        echo "🎯 Environment Setup Complete!"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Compiler: ${{ inputs.compiler }}"
+        echo "CC: ${CC:-not-set}"
+        echo "CXX: ${CXX:-not-set}"
+        if [[ "${{ inputs.enable-ccache }}" == "true" ]]; then
+          echo "ccache: enabled (max: ${{ inputs.ccache-size }})"
+        else
+          echo "ccache: disabled"
+        fi
+        if [[ -n "${{ inputs.extra-packages }}" ]]; then
+          echo "Extra packages: ${{ inputs.extra-packages }}"
+        fi
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

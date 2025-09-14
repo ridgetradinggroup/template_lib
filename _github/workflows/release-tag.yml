@@ -30,7 +30,7 @@ name: 🏷️ Release Validation
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+$'  # Only clean versions (v1.0.0), no suffixes for now
+      - 'v[0-9]+.[0-9]+.[0-9]+'  # Only clean versions (v1.0.0), no suffixes for now
 
 jobs:
   # ==============================================================================
@@ -45,6 +45,7 @@ jobs:
       compiler: gcc
       buildType: debug
       enable-ccache-stats: false
+      enable-testing: false
       cmake-args: "-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF -Wno-dev"
 
   # ==============================================================================
@@ -60,7 +61,7 @@ jobs:
     
     steps:
       - name: Checkout Source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -80,14 +81,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3
 
-      - name: Restore Build Directory from CMake Job
-        uses: actions/cache@v4
+      - name: Download Build Artifacts from CMake Job
+        uses: actions/download-artifact@v4
         with:
-          path: build
-          key: build-gcc-debug-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
-          restore-keys: |
-            build-gcc-debug-
-            build-gcc-
+          name: build-artifacts-debug-gcc
+          path: build/
 
       - name: Extract CMake Version
         id: cmake-version
@@ -108,13 +106,14 @@ jobs:
           
           echo "✅ Found CMakeCache.txt from cmake-build job"
           
-          # Extract PROJECT_VERSION from CMakeCache.txt (robust parsing)
-          CMAKE_VERSION=$(
-              # More robust parsing that handles spaces and edge cases
-              sed -n 's/^PROJECT_VERSION:.*=\(.*\)$/\1/p' build/CMakeCache.txt 2>/dev/null | head -n1 || \
-              sed -n 's/^CMAKE_PROJECT_VERSION:.*=\(.*\)$/\1/p' build/CMakeCache.txt 2>/dev/null | head -n1 || \
-              echo ""
-          )
+          # Debug: Show version-related entries in CMakeCache.txt
+          echo "🔍 Debug: Version entries in CMakeCache.txt:"
+          grep -i "version" build/CMakeCache.txt | head -10 || echo "No version entries found"
+          
+          # Extract CMAKE_PROJECT_VERSION from CMakeCache.txt (most reliable method)
+          CMAKE_VERSION=$(sed -n 's/^CMAKE_PROJECT_VERSION:.*=\(.*\)$/\1/p' build/CMakeCache.txt 2>/dev/null | head -n1 | tr -d ' ')
+          
+          echo "🔍 Debug: CMAKE_PROJECT_VERSION found: '$CMAKE_VERSION'"
           
           echo "CMAKE_VERSION=$CMAKE_VERSION" >> $GITHUB_ENV
           echo "cmake-version=$CMAKE_VERSION" >> $GITHUB_OUTPUT
@@ -123,92 +122,20 @@ jobs:
       - name: Extract vcpkg.json Version
         id: vcpkg-version
         run: |
-          echo "::group::Extract vcpkg.json version using Python"
+          echo "::group::Extract vcpkg.json version using Python script"
           
-          # Create Python script for version extraction with detailed logging
-          cat > extract_vcpkg_version.py << 'EOF'
-import json
-import sys
-import traceback
-from pathlib import Path
-
-def log_info(message):
-    print(f"[INFO] {message}", file=sys.stderr)
-
-def log_warning(message):
-    print(f"[WARNING] {message}", file=sys.stderr)
-
-def log_error(message):
-    print(f"[ERROR] {message}", file=sys.stderr)
-
-def main():
-    try:
-        vcpkg_path = Path('vcpkg.json')
-        log_info(f"Looking for vcpkg.json at: {vcpkg_path}")
-        
-        if not vcpkg_path.exists():
-            log_error("vcpkg.json file not found")
-            return ""
-        
-        log_info("Reading vcpkg.json...")
-        with open(vcpkg_path) as f:
-            data = json.load(f)
-        
-        log_info(f"vcpkg.json keys: {list(data.keys())}")
-        
-        # Check all possible version fields in vcpkg.json
-        version_fields = ['version', 'version-string', 'version-semver', 'version-date']
-        found_version = None
-        
-        for field in version_fields:
-            if field in data and data[field]:
-                found_version = data[field]
-                log_info(f"Found version in '{field}': {found_version}")
-                break
-        
-        if found_version:
-            log_info(f"✅ Successfully extracted version: {found_version}")
-            # Print to stdout for capture
-            print(found_version)
-            return found_version
-        else:
-            log_warning("No version field found in vcpkg.json")
-            log_info(f"Available fields: {list(data.keys())}")
-            return ""
-            
-    except json.JSONDecodeError as e:
-        log_error(f"JSON decode error: {e}")
-        log_error("Failed to parse vcpkg.json")
-        traceback.print_exc(file=sys.stderr)
-        return ""
-    except Exception as e:
-        log_error(f"Unexpected error: {e}")
-        log_error(f"Exception type: {type(e).__name__}")
-        traceback.print_exc(file=sys.stderr)
-        return ""
-
-if __name__ == "__main__":
-    result = main()
-    if not result:
-        log_error("Failed to extract version from vcpkg.json")
-        sys.exit(1)
-EOF
+          # Use standalone Python script to extract version
+          VCPKG_VERSION=$(python3 .github/scripts/extract_vcpkg_version.py)
           
-          # Run Python script and capture version
-          if ! VCPKG_VERSION=$(python3 extract_vcpkg_version.py); then
-            echo "::error::Python vcpkg version extraction script failed"
-            echo "::group::Python script content for debugging"
-            cat extract_vcpkg_version.py
-            echo "::endgroup::"
-            echo "::group::Current vcpkg.json content"
-            cat vcpkg.json || echo "File not readable"
-            echo "::endgroup::"
-            VCPKG_VERSION=""
+          if [ -z "$VCPKG_VERSION" ]; then
+            echo "::error::Failed to extract version from vcpkg.json"
+            exit 1
           fi
-          echo "::endgroup::"
           
+          echo "Extracted vcpkg version: $VCPKG_VERSION"
           echo "VCPKG_VERSION=$VCPKG_VERSION" >> $GITHUB_ENV
           echo "vcpkg-version=$VCPKG_VERSION" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
 
       - name: Validate Version Consistency
         run: |

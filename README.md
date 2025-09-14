@@ -89,13 +89,72 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-## 🏗️ CI/CD
+## 🏗️ CI/CD & Developer Workflow
 
-This project includes GitHub Actions CI that:
-- ✅ Runs unit tests with Google Test
-- ✅ Tests 4 build configurations (Debug/Release × Static/Shared)
-- ✅ Validates downstream consumption with find_package()
-- ✅ Ensures cross-platform compatibility
+This project includes automated GitHub Actions workflows for different development scenarios:
+
+### 📋 Workflow Summary
+
+| Workflow | Trigger | Purpose | When to Use |
+|----------|---------|---------|-------------|
+| **🚀 Build & Test CI** | `git push` (to branches) | Complete CI/CD pipeline with unit tests | Every code change |
+| **🏷️ Release Validation** | `git push origin v1.0.0` (individual tag) | Validate version consistency before release | Creating releases |
+| **📦 Publish to Registry** | GitHub Release creation | Publish to vcpkg private registry | After successful validation |
+
+### 🔄 Developer Workflow
+
+#### 1. **Regular Development** (triggers Build & Test CI)
+```bash
+# Make your changes
+git add .
+git commit -m "Add new feature"
+git push origin main  # ✅ Triggers: Build & Test CI
+```
+**What happens**: Runs unit tests, integration tests, and validates downstream consumption.
+
+#### 2. **Creating a Release** (triggers Release Validation)
+```bash
+# First, ensure versions match in CMakeLists.txt and vcpkg.json
+# Example: version "1.2.3" in both files
+
+# Create and push tag individually (NOT --tags)
+git tag v1.2.3
+git push origin v1.2.3  # ✅ Triggers: Release Validation
+```
+**What happens**: Validates that tag version matches CMakeLists.txt and vcpkg.json versions.
+
+#### 3. **Publishing Release** (triggers Publish to Registry)
+```bash
+# After Release Validation passes:
+# 1. Go to GitHub repository
+# 2. Click "Releases" → "Create a new release"  
+# 3. Select your tag (v1.2.3)
+# 4. Click "Publish release"  # ✅ Triggers: Publish to Registry
+```
+**What happens**: Publishes package to private vcpkg registry for downstream consumption.
+
+### ⚠️ Important Notes
+
+- **Tag Format**: Use exact semantic versions (`v1.0.0`, `v2.1.3`) - no suffixes allowed
+- **Individual Tag Push**: Use `git push origin v1.0.0` (not `git push origin --tags`)
+- **Version Consistency**: Ensure CMakeLists.txt and vcpkg.json versions match the tag
+- **Branch vs Tag**: Regular pushes only trigger CI, tags only trigger release validation
+
+### 🔍 Troubleshooting Workflows
+
+**Build & Test CI not running?**
+- Check if pushing to a branch (not tag)
+- Workflow runs on all branches, excludes tags
+
+**Release Validation not triggered?**
+- Use individual tag push: `git push origin v1.0.0`
+- Avoid batch push: `git push origin --tags`
+- Ensure tag matches pattern: `v[0-9]+.[0-9]+.[0-9]+`
+
+**Version validation failing?**
+- Check CMakeLists.txt: `project(name VERSION 1.0.0)`
+- Check vcpkg.json: `"version": "1.0.0"`
+- All three must match: tag, CMake, vcpkg
 
 ## 📁 Project Structure
 

@@ -25,27 +25,29 @@ inputs:
     description: 'Directory path where vcpkg will be cloned and bootstrapped'
     required: true
     default: ${{ runner.temp }}/vcpkg
-  vcpkgJsonGlob:
-    description: 'Path or glob pattern to vcpkg.json manifest file for dependency detection'
-    required: true
-    default: 'vcpkg.json'
 
 runs:
   using: "composite"
   steps:
     # Clone the official Microsoft vcpkg repository to specified directory
-    # Only clones if directory doesn't exist to avoid unnecessary re-cloning
+    # Validates existing directory or clones fresh if invalid/missing
     - name: Clone vcpkg repository
       shell: bash
       run: |
         # ==============================================================================
         # Clone vcpkg Repository from Official Microsoft Source
         # ==============================================================================
-        if [[ ! -d "${{ inputs.vcpkgDirectory }}" ]]; then
-          echo "Cloning vcpkg repository to ${{ inputs.vcpkgDirectory }}"
-          git clone https://github.com/Microsoft/vcpkg.git ${{ inputs.vcpkgDirectory }}
+        # Check if vcpkg directory exists and contains valid vcpkg installation
+        if [[ -d "${{ inputs.vcpkgDirectory }}" ]] && [[ -f "${{ inputs.vcpkgDirectory }}/bootstrap-vcpkg.sh" ]]; then
+          echo "✅ vcpkg directory already exists with valid installation, skipping clone"
         else
-          echo "vcpkg directory already exists, skipping clone"
+          if [[ -d "${{ inputs.vcpkgDirectory }}" ]]; then
+            echo "⚠️  vcpkg directory exists but appears corrupted, removing and re-cloning"
+            rm -rf "${{ inputs.vcpkgDirectory }}"
+          fi
+          echo "📥 Cloning vcpkg repository to ${{ inputs.vcpkgDirectory }}"
+          git clone https://github.com/Microsoft/vcpkg.git ${{ inputs.vcpkgDirectory }}
+          echo "✅ vcpkg repository cloned successfully"
         fi
 
     # Bootstrap vcpkg for the target platform (Windows or Unix-like systems)
@@ -57,12 +59,20 @@ runs:
         # Bootstrap vcpkg for Target Platform
         # ==============================================================================
         cd ${{ inputs.vcpkgDirectory }}
-        if [[ "$RUNNER_OS" == "Windows" ]]; then
-          echo "Bootstrapping vcpkg for Windows platform"
-          ./bootstrap-vcpkg.bat
+        
+        # Check if vcpkg is already bootstrapped
+        if [[ -f "./vcpkg" ]] || [[ -f "./vcpkg.exe" ]]; then
+          echo "✅ vcpkg already bootstrapped, skipping bootstrap step"
         else
-          echo "Bootstrapping vcpkg for Unix-like platform"
-          ./bootstrap-vcpkg.sh
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "🔧 Bootstrapping vcpkg for Windows platform"
+            ./bootstrap-vcpkg.bat
+          else
+            echo "🔧 Bootstrapping vcpkg for Unix-like platform"
+            chmod +x ./bootstrap-vcpkg.sh
+            ./bootstrap-vcpkg.sh
+          fi
+          echo "✅ vcpkg bootstrap completed successfully"
         fi
 
     # Configure vcpkg environment variables and PATH for downstream usage
@@ -86,8 +96,21 @@ runs:
         # ==============================================================================
         # Verify vcpkg Installation and Prepare for Manifest Mode
         # ==============================================================================
+        # Verify vcpkg binary exists and is executable
+        VCPKG_BINARY="${{ inputs.vcpkgDirectory }}/vcpkg"
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          VCPKG_BINARY="${{ inputs.vcpkgDirectory }}/vcpkg.exe"
+        fi
+        
+        if [[ ! -f "$VCPKG_BINARY" ]]; then
+          echo "❌ vcpkg binary not found at $VCPKG_BINARY"
+          exit 1
+        fi
+        
         echo "✅ vcpkg setup complete"
-        echo "vcpkg binary location: ${{ inputs.vcpkgDirectory }}/vcpkg"
-        echo "Manifest mode will automatically detect ${{ inputs.vcpkgJsonGlob }}"
-        # Test vcpkg binary is working
-        ${{ inputs.vcpkgDirectory }}/vcpkg version
+        echo "📍 vcpkg binary location: $VCPKG_BINARY"
+        echo "🔧 Manifest mode will automatically detect vcpkg.json when present"
+        
+        # Test vcpkg binary is working and display version
+        echo "🧪 Testing vcpkg binary:"
+        "$VCPKG_BINARY" version

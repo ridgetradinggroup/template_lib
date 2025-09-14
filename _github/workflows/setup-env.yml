@@ -93,7 +93,7 @@ jobs:
     steps:
       # Checkout source code with full history for comprehensive environment setup
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0  # Full history needed for version detection and git operations
 
@@ -128,17 +128,17 @@ jobs:
             echo "CXX=clang++-${CLANG_VERSION}" >> $GITHUB_ENV
             echo "LD=lld-${CLANG_VERSION}" >> $GITHUB_ENV
           else
-            echo "Installing GCC 13 toolchain (default)..."
-            sudo apt-get install -y gcc-13 g++-13
+            echo "Installing GCC 12 toolchain (default for Ubuntu 22.04)..."
+            sudo apt-get install -y gcc-12 g++-12
             
             # Export compiler paths for downstream jobs
-            echo "cc=gcc-13" >> $GITHUB_OUTPUT
-            echo "cxx=g++-13" >> $GITHUB_OUTPUT
+            echo "cc=gcc-12" >> $GITHUB_OUTPUT
+            echo "cxx=g++-12" >> $GITHUB_OUTPUT
             echo "ld=ld" >> $GITHUB_OUTPUT
             
             # Set environment variables for this job
-            echo "CC=gcc-13" >> $GITHUB_ENV
-            echo "CXX=g++-13" >> $GITHUB_ENV
+            echo "CC=gcc-12" >> $GITHUB_ENV
+            echo "CXX=g++-12" >> $GITHUB_ENV
           fi
           
           # ==============================================================================
@@ -173,7 +173,6 @@ jobs:
         uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
-          vcpkgJsonGlob: vcpkg.json
 
       - name: Export vcpkg Root Path
         if: inputs.install-vcpkg == true

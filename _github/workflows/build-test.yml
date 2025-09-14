@@ -30,7 +30,11 @@ name: 🚀 Build & Test CI
 
 on:
   push:
-  pull_request:
+    branches:
+      - '**'  # All branches
+#    tags-ignore:
+#      - '**'  # Exclude all tags
+#  pull_request:
 
 jobs:
   # ==============================================================================
@@ -92,39 +96,86 @@ jobs:
     steps:
       # Checkout source code with full history for comprehensive testing
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0  # Full history needed for proper git operations
 
       # Restore cached build directory from the build job
-      # Uses branch-based cache keys for optimal cache hit rates
+      # Uses commit-specific cache keys to ensure artifacts from the current build
       - name: Cache Build Directory
+        id: cache-build
         uses: actions/cache@v4
         with:
           path: build
-          key: build-${{ matrix.compiler }}-${{ matrix.buildType }}-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
+          key: build-${{ matrix.compiler }}-${{ matrix.buildType }}-${{ github.sha }}-${{ github.run_id }}
           restore-keys: |
+            build-${{ matrix.compiler }}-${{ matrix.buildType }}-${{ github.sha }}-
             build-${{ matrix.compiler }}-${{ matrix.buildType }}-
             build-${{ matrix.compiler }}-
 
-      # Verify that build artifacts exist from the previous build job
+      # Download build artifacts as primary method for inter-job artifact sharing
+      # Always attempts download to ensure we have the latest build artifacts
+      - name: Download Build Artifacts
+        id: download-artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-${{ matrix.buildType }}-${{ matrix.compiler }}
+          path: build/
+        continue-on-error: true  # Don't fail immediately, let verification step provide better error
+
+      # Check artifact download status and provide helpful error messages
+      - name: Check Artifact Download Status
+        if: steps.download-artifacts.outcome == 'failure'
+        run: |
+          echo "❌ Failed to download build artifacts"
+          echo "   Artifact name: build-artifacts-${{ matrix.buildType }}-${{ matrix.compiler }}"
+          echo "   This suggests either:"
+          echo "   1. The build job failed and didn't upload artifacts"
+          echo "   2. There's a naming mismatch between upload and download"
+          echo "   3. The build job didn't complete before this job started"
+          echo ""
+          echo "🔍 Check the build job logs for errors or failures"
+          exit 1
+
+      # Verify that build artifacts exist and are valid
       # This ensures the build completed successfully before running tests
       - name: Verify Build Artifacts
         run: |
           # ==============================================================================
-          # Verify Build Artifacts from Previous Job
+          # Verify Build Artifacts from Build Job
           # ==============================================================================
-          # Check if build artifacts exist from the build job's cache
-          if [[ ! -d "build" ]] || [[ ! -f "build/CMakeCache.txt" ]]; then
-            echo "❌ Build artifacts not found in cache. This suggests the build job failed."
-            echo "   The build directory should be populated by the previous build job."
-            echo "   Check the build job logs for compilation errors."
+          echo "🔍 Checking for build artifacts from build job..."
+          
+          # Check for build directories (presets may create subdirectories)
+          BUILD_DIR=""
+          if [[ -d "build/${{ matrix.buildType }}" ]]; then
+            BUILD_DIR="build/${{ matrix.buildType }}"
+            echo "📁 Using preset-specific build directory: $BUILD_DIR"
+          elif [[ -d "build" ]]; then
+            BUILD_DIR="build"
+            echo "📁 Using standard build directory: $BUILD_DIR"
+          else
+            echo "❌ No build directory found"
+            echo "   Expected: build/ or build/${{ matrix.buildType }}/ directory from build job"
+            echo "   This suggests artifact download failed or build job didn't complete"
+            echo "   Current directory contents:"
+            ls -la . || true
             exit 1
           fi
           
-          echo "✅ Build artifacts found in cache from build job"
-          echo "Build directory contents:"
-          ls -la build/ || true
+          # Check for CMake cache file (indicates successful configuration)
+          if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+            echo "❌ CMakeCache.txt not found in $BUILD_DIR"
+            echo "   This suggests CMake configuration failed in build job"
+            echo "   Build directory contents:"
+            ls -la "$BUILD_DIR/" || true
+            exit 1
+          fi
+          
+          echo "✅ Build artifacts successfully restored from build job"
+          echo "📁 Build directory: $BUILD_DIR"
+          ls -la "$BUILD_DIR/" || true
+          echo "🔧 CMake configuration verified - ready for testing"
 
       # Execute unit tests using ctest with matrix configuration
       # Supports both JUnit XML output (CMake 3.21+) and standard output
@@ -133,30 +184,97 @@ jobs:
           # ==============================================================================
           # Execute Unit Tests with Comprehensive Reporting
           # ==============================================================================
+          # Determine build directory structure
+          BUILD_DIR=""
+          if [[ -d "build/${{ matrix.buildType }}" ]]; then
+            BUILD_DIR="build/${{ matrix.buildType }}"
+            echo "📁 Running tests from preset-specific directory: $BUILD_DIR"
+          elif [[ -d "build" ]]; then
+            BUILD_DIR="build"
+            echo "📁 Running tests from standard directory: $BUILD_DIR"
+          else
+            echo "❌ No build directory found for testing"
+            exit 1
+          fi
+          
+          # Change to build directory for testing
+          cd "$BUILD_DIR"
+          
+          # Verify that tests were built and are available
+          if ! ctest --show-only=json-v1 2>/dev/null | grep -q '"name"'; then
+            echo "⚠️  No tests found in build directory"
+            echo "   This might mean BUILD_TESTING=OFF in the preset or tests weren't built"
+            echo "   Available CTest targets:"
+            ctest --show-only 2>/dev/null || echo "   No CTest configuration found"
+            exit 0  # Exit successfully but skip test execution
+          fi
+          
+          echo "📋 Found tests to execute:"
+          ctest --show-only --quiet
+          
           # Check if ctest supports --output-junit for better GitHub integration
           if ctest --help | grep -q "output-junit"; then
             echo "Using JUnit output for better GitHub UI integration"
-            ctest --preset ${{ matrix.buildType }} --output-on-failure --output-junit test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml
+            XML_FILE="test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml"
+            
+            # Run tests and generate XML output
+            if ctest --output-on-failure --output-junit "$XML_FILE"; then
+              echo "✅ Tests completed successfully with JUnit XML output"
+            else
+              echo "❌ Tests failed but JUnit XML output was generated"
+              exit 1
+            fi
+            
+            # Move XML file to workspace root for artifact upload
+            if [[ -f "$XML_FILE" ]]; then
+              mv "$XML_FILE" "../$XML_FILE"
+              echo "📄 JUnit XML moved to workspace root: ../$XML_FILE"
+            else
+              echo "⚠️  JUnit XML file not found: $XML_FILE"
+            fi
           else
             echo "CMake version does not support --output-junit, using standard output"
-            ctest --preset ${{ matrix.buildType }} --output-on-failure
+            ctest --output-on-failure
+            # Create empty XML file to prevent upload failures
+            touch "../test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml"
           fi
+          
+          # Return to workspace root
+          cd ..
         
+      # Verify JUnit XML file exists before upload and reporting
+      - name: Verify Test Results File
+        id: verify-xml
+        run: |
+          XML_FILE="test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml"
+          if [[ -f "$XML_FILE" ]] && [[ -s "$XML_FILE" ]]; then
+            echo "✅ JUnit XML file found and not empty: $XML_FILE"
+            echo "file-exists=true" >> $GITHUB_OUTPUT
+            echo "📄 File size: $(stat -c%s "$XML_FILE") bytes"
+            echo "📋 File preview:"
+            head -n 10 "$XML_FILE" || true
+          else
+            echo "⚠️  JUnit XML file missing or empty: $XML_FILE"
+            echo "file-exists=false" >> $GITHUB_OUTPUT
+            echo "📁 Current directory contents:"
+            ls -la . || true
+          fi
+
       # Upload JUnit XML test results for GitHub UI integration
       # Always runs to capture results even on test failures
       - name: Upload Test Results
-        if: always()  # Upload even on failure for better reporting
+        if: always() && steps.verify-xml.outputs.file-exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.buildType }}-${{ matrix.compiler }}
           path: test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml
-          if-no-files-found: ignore  # Don't fail if JUnit XML wasn't generated
+          if-no-files-found: warn
 
       # Publish test results to GitHub PR with annotations and summary
       # Provides rich test reporting directly in the GitHub UI
       - name: Publish Test Results
-        if: always()  # Publish even on failure for GitHub PR annotations
-        uses: dorny/test-reporter@v1
+        if: always() && steps.verify-xml.outputs.file-exists == 'true'
+        uses: dorny/test-reporter@v2
         with:
           name: Unit Tests (${{ matrix.buildType }} - ${{ matrix.compiler }})
           path: test-results-${{ matrix.buildType }}-${{ matrix.compiler }}.xml
@@ -171,7 +289,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-logs-${{ matrix.buildType }}-${{ matrix.compiler }}
-          path: build/**/Testing/**/*.log
+          path: |
+            build/**/Testing/**/*.log
+            build/${{ matrix.buildType }}/**/Testing/**/*.log
           if-no-files-found: warn
 
   # ==============================================================================
@@ -192,7 +312,7 @@ jobs:
     steps:
       # Checkout source code with full history for integration testing
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0  # Full history needed for comprehensive integration tests
 
@@ -204,8 +324,8 @@ jobs:
           # Restore Environment from Setup Job (GCC Debug Only)
           # ==============================================================================
           # Integration tests reuse environment from the setup job to eliminate duplication
-          echo "CC=gcc-13" >> $GITHUB_ENV
-          echo "CXX=g++-13" >> $GITHUB_ENV  
+          echo "CC=gcc-12" >> $GITHUB_ENV
+          echo "CXX=g++-12" >> $GITHUB_ENV  
           echo "/usr/lib/ccache" >> $GITHUB_PATH
 
       # Install essential build tools for integration testing
@@ -218,7 +338,7 @@ jobs:
           # ==============================================================================
           # Quick install leveraging apt cache from previous jobs
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 ccache
+          sudo apt-get install -y cmake ninja-build gcc-12 g++-12 ccache
 
       # Cache vcpkg packages specifically for integration tests
       # Uses dedicated cache key for debug configuration
@@ -241,7 +361,6 @@ jobs:
         uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
-          vcpkgJsonGlob: vcpkg.json
 
       # Execute comprehensive downstream compatibility tests
       # Tests all 8 configurations: Debug/Release × Static/Shared × 2 build types

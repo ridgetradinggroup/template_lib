@@ -87,6 +87,11 @@ on:
         required: false
         type: boolean
         default: true
+      enable-testing:
+        description: 'Enable BUILD_TESTING and vcpkg test features'
+        required: false
+        type: boolean
+        default: true
       
 jobs:
   build:
@@ -96,7 +101,7 @@ jobs:
     steps:
       # Checkout source code with full history for comprehensive build operations
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0  # Full history needed for version extraction and git operations
 
@@ -113,9 +118,9 @@ jobs:
             echo "CC=clang-15" >> $GITHUB_ENV
             echo "CXX=clang++-15" >> $GITHUB_ENV
           else
-            echo "Setting up GCC 13 compiler toolchain"
-            echo "CC=gcc-13" >> $GITHUB_ENV
-            echo "CXX=g++-13" >> $GITHUB_ENV
+            echo "Setting up GCC 12 compiler toolchain"
+            echo "CC=gcc-12" >> $GITHUB_ENV
+            echo "CXX=g++-12" >> $GITHUB_ENV
           fi
           # Enable ccache for faster compilation by adding to PATH
           echo "/usr/lib/ccache" >> $GITHUB_PATH
@@ -131,11 +136,12 @@ jobs:
           # Install core build tools required for CMake operations
           echo "Installing essential build tools and compiler toolchain"
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 ccache
+          sudo apt-get install -y cmake ninja-build gcc-12 g++-12 ccache
 
       # Cache vcpkg packages to speed up dependency installation
       # Uses content-based cache keys for vcpkg manifest files
       - name: Cache vcpkg Packages
+        if: hashFiles('vcpkg.json') != ''
         uses: actions/cache@v4
         with:
           path: |
@@ -147,6 +153,13 @@ jobs:
             vcpkg-${{ inputs.compiler }}-
             vcpkg-
       
+      # Ensure ccache directory exists before caching
+      # Prevents cache warnings about non-existent paths
+      - name: Create ccache Directory
+        run: |
+          mkdir -p ~/.ccache
+          echo "📁 ccache directory created: ~/.ccache"
+
       # Cache ccache data for faster incremental compilation
       # Uses branch-based cache keys for optimal cache hit rates across PRs
       - name: Cache ccache (Compiler Cache)
@@ -165,8 +178,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build
-          key: build-${{ inputs.compiler }}-${{ inputs.buildType }}-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
+          key: build-${{ inputs.compiler }}-${{ inputs.buildType }}-${{ github.sha }}-${{ github.run_id }}
           restore-keys: |
+            build-${{ inputs.compiler }}-${{ inputs.buildType }}-${{ github.sha }}-
             build-${{ inputs.compiler }}-${{ inputs.buildType }}-
             build-${{ inputs.compiler }}-
 
@@ -177,7 +191,6 @@ jobs:
         uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
-          vcpkgJsonGlob: vcpkg.json
 
       # Reset ccache statistics to measure per-build performance
       # Only runs when ccache statistics reporting is enabled
@@ -209,6 +222,15 @@ jobs:
           # Append additional CMake arguments if provided by user
           if [[ -n "${{ inputs.cmake-args }}" ]]; then
             CMAKE_CONFIGURE_CMD="$CMAKE_CONFIGURE_CMD ${{ inputs.cmake-args }}"
+          fi
+          
+          # Conditionally enable testing based on input parameter
+          if [ "${{ inputs.enable-testing }}" == "true" ]; then
+            CMAKE_CONFIGURE_CMD="$CMAKE_CONFIGURE_CMD -DBUILD_TESTING=ON -DVCPKG_MANIFEST_FEATURES=test"
+            echo "🧪 Testing enabled: BUILD_TESTING=ON, VCPKG_MANIFEST_FEATURES=test"
+          else
+            CMAKE_CONFIGURE_CMD="$CMAKE_CONFIGURE_CMD -DBUILD_TESTING=OFF"
+            echo "⚡ Testing disabled: BUILD_TESTING=OFF"
           fi
           
           echo "🔧 Executing CMake configuration: $CMAKE_CONFIGURE_CMD"
@@ -253,6 +275,53 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           ccache --show-stats
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # Verify build artifacts before upload
+      # Ensures we're uploading valid build results to downstream jobs
+      - name: Verify Build Artifacts Before Upload
+        run: |
+          # ==============================================================================
+          # Verify Build Directory Contents Before Artifact Upload
+          # ==============================================================================
+          echo "🔍 Verifying build artifacts before upload..."
+          
+          # Check for build directories (presets may create subdirectories)
+          BUILD_DIR=""
+          if [[ -d "build/${{ inputs.buildType }}" ]]; then
+            BUILD_DIR="build/${{ inputs.buildType }}"
+            echo "📁 Using preset-specific build directory: $BUILD_DIR"
+          elif [[ -d "build" ]]; then
+            BUILD_DIR="build"
+            echo "📁 Using standard build directory: $BUILD_DIR"
+          else
+            echo "❌ No build directory found - build process may have failed"
+            echo "   Expected: build/ or build/${{ inputs.buildType }}/"
+            ls -la . || true
+            exit 1
+          fi
+          
+          # Verify CMakeCache.txt exists in the build directory
+          if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+            echo "❌ CMakeCache.txt not found in $BUILD_DIR - CMake configuration may have failed"
+            echo "   Build directory contents:"
+            ls -la "$BUILD_DIR/" || true
+            exit 1
+          fi
+          
+          echo "✅ Build artifacts verified - ready for upload"
+          echo "📁 Build directory: $BUILD_DIR ($(du -sh $BUILD_DIR | cut -f1))"
+          echo "📄 Key files present:"
+          ls -la "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/compile_commands.json" 2>/dev/null || true
+
+      # Upload build directory as artifact for downstream jobs (tests)
+      # Ensures build artifacts are available even if cache fails
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-${{ inputs.buildType }}-${{ inputs.compiler }}
+          path: build/
+          retention-days: 1  # Short retention since this is only for workflow inter-job communication
+          if-no-files-found: error  # Fail if no build artifacts to upload
 
       # Upload CMake build logs for debugging build failures
       # Only uploads on failure to conserve artifact storage space
