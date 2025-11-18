@@ -164,7 +164,7 @@ vcpkg_cmake_install()
 # Fix cmake config path
 vcpkg_cmake_config_fixup(
     PACKAGE_NAME {vcpkg_package_name}
-    CONFIG_PATH lib/cmake/{vcpkg_package_name}
+    CONFIG_PATH lib/cmake/{repo}
 )
 
 # Remove debug includes

@@ -11,9 +11,9 @@ include(CMakeFindDependencyMacro)
 include("${CMAKE_CURRENT_LIST_DIR}/{{ project_name_underscore }}Targets.cmake")
 
 # Provide the library target for backwards compatibility
-# This allows users to use both {{ project_name_underscore }}::{{ project_name_underscore }} (new) and {{ project_name_underscore }} (old) syntax
-if(NOT TARGET {{ project_name_underscore }} AND TARGET {{ project_name_underscore }}::{{ project_name_underscore }})
-    add_library({{ project_name_underscore }} ALIAS {{ project_name_underscore }}::{{ project_name_underscore }})
+# This allows users to use both {{ namespace_scope }}::{{ project_name_underscore }} (new) and {{ project_name_underscore }} (old) syntax
+if(NOT TARGET {{ project_name_underscore }} AND TARGET {{ namespace_scope }}::{{ project_name_underscore }})
+    add_library({{ project_name_underscore }} ALIAS {{ namespace_scope }}::{{ project_name_underscore }})
 endif()
 
 # Check that required components are available
