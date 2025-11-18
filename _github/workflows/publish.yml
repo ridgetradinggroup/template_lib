@@ -36,6 +36,11 @@ on:
   release:
     types: [published]
 
+# Prevent concurrent publishing to vcpkg-ridge registry to avoid merge conflicts
+concurrency:
+  group: vcpkg-registry-publish
+  cancel-in-progress: false  # Queue workflows instead of cancelling them
+
 jobs:
   # ==============================================================================
   # Publish to Registry Job - Complete vcpkg Registry Publishing Pipeline
@@ -279,17 +284,37 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Safely handle concurrent changes with conflict detection
-          git fetch origin main
-          
-          # Check for merge conflicts before attempting merge
-          if ! git merge --no-commit --no-ff origin/main; then
-            echo "::error::Merge conflicts detected with registry main branch"
-            echo "❌ ERROR: Merge conflicts detected with registry main branch"
-            echo "Manual intervention required to resolve conflicts"
-            git merge --abort
-            exit 1
-          fi
+          # Safely handle concurrent changes with conflict detection and retry logic
+          echo "🔄 Attempting to merge registry changes with retry logic..."
+
+          for attempt in {1..5}; do
+            echo "Attempt $attempt of 5..."
+            git fetch origin main
+
+            # Check for merge conflicts before attempting merge
+            if git merge --no-commit --no-ff origin/main; then
+              echo "✅ Successfully merged registry changes on attempt $attempt"
+              break
+            else
+              echo "⚠️ Merge conflict detected on attempt $attempt"
+              git merge --abort
+
+              if [ $attempt -eq 5 ]; then
+                echo "::error::Merge conflicts persist after 5 attempts"
+                echo "❌ ERROR: Registry merge failed after 5 retry attempts"
+                echo "This indicates persistent concurrent publishing conflicts"
+                exit 1
+              fi
+
+              # Exponential backoff: wait longer on each retry
+              sleep_time=$((attempt * 10))
+              echo "⏳ Waiting ${sleep_time} seconds before retry..."
+              sleep $sleep_time
+
+              # Reset to clean state for next attempt
+              git reset --hard HEAD
+            fi
+          done
           
           # Add both port files and version database changes
           git add ports/$VCPKG_PACKAGE_NAME
