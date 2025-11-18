@@ -64,7 +64,7 @@ install(DIRECTORY include/
 install(EXPORT {{ project_name_underscore }}Targets
     FILE {{ project_name_underscore }}Targets.cmake
     NAMESPACE {{ namespace_scope }}::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/{{ project_name_underscore }}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/{{ project_name_vcpkg }}
 )
 
 #-------------------------------------------------------------------------------
@@ -76,23 +76,23 @@ include(CMakePackageConfigHelpers)
 
 # Generate the version file
 write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/{{ project_name_underscore }}ConfigVersion.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/{{ project_name_vcpkg }}ConfigVersion.cmake"
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 
 # Configure the config file
 configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/{{ project_name_underscore }}Config.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/{{ project_name_underscore }}Config.cmake"
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/{{ project_name_underscore }}
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/{{ project_name_vcpkg }}Config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/{{ project_name_vcpkg }}Config.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/{{ project_name_vcpkg }}
 )
 
 # Install package configuration files
 install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/{{ project_name_underscore }}Config.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/{{ project_name_underscore }}ConfigVersion.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/{{ project_name_underscore }}
+    "${CMAKE_CURRENT_BINARY_DIR}/{{ project_name_vcpkg }}Config.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/{{ project_name_vcpkg }}ConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/{{ project_name_vcpkg }}
 )
 
 #-------------------------------------------------------------------------------
