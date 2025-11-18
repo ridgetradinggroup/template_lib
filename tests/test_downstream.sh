@@ -56,7 +56,7 @@ fi
 # Set trap for smart cleanup
 trap cleanup_if_appropriate EXIT
 
-echo "=== Testing {{ project_name_vcpkg }} downstream compatibility ==="
+echo "=== Testing {{ project_name_underscore }} downstream compatibility =="
 
 # Check for vcpkg
 if [ -z "$VCPKG_ROOT" ] || [ ! -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ]; then
@@ -141,7 +141,7 @@ for build_type in "${BUILD_TYPES[@]}"; do
             -DCMAKE_INSTALL_PREFIX="${install_dir}" \
             -DVCPKG_MANIFEST_FEATURES=test \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-            -DENDTOENDTEST_EXPORT_BUILD_TREE=ON > /dev/null 2>&1; then
+            -D{{ project_name_upper }}_EXPORT_BUILD_TREE=ON > /dev/null 2>&1; then
             echo "   ✓ Configuration successful"
         else
             echo -e "   ${RED}✗ Configuration failed${NC}"
@@ -176,8 +176,8 @@ for build_type in "${BUILD_TYPES[@]}"; do
             echo "   ✓ Downstream configuration successful"
         else
             echo -e "   ${RED}✗ Downstream configuration failed${NC}"
-            echo "   Check if {{ project_name_vcpkg }}Config.cmake was installed to ${install_dir}/lib/cmake/{{ project_name_vcpkg }}/"
-            ls -la "${install_dir}/lib/cmake/{{ project_name_vcpkg }}/" 2>/dev/null || echo "   Directory not found!"
+            echo "   Check if {{ project_name_underscore }}Config.cmake was installed to ${install_dir}/lib/cmake/{{ project_name_underscore }}/"
+            ls -la "${install_dir}/lib/cmake/{{ project_name_underscore }}/" 2>/dev/null || echo "   Directory not found!"
             continue
         fi
         
