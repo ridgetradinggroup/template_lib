@@ -56,7 +56,7 @@ fi
 # Set trap for smart cleanup
 trap cleanup_if_appropriate EXIT
 
-echo "=== Testing EndToEndTest downstream compatibility ==="
+echo "=== Testing {{ project_name_vcpkg }} downstream compatibility ==="
 
 # Check for vcpkg
 if [ -z "$VCPKG_ROOT" ] || [ ! -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ]; then
@@ -176,8 +176,8 @@ for build_type in "${BUILD_TYPES[@]}"; do
             echo "   ✓ Downstream configuration successful"
         else
             echo -e "   ${RED}✗ Downstream configuration failed${NC}"
-            echo "   Check if EndToEndTestConfig.cmake was installed to ${install_dir}/lib/cmake/EndToEndTest/"
-            ls -la "${install_dir}/lib/cmake/EndToEndTest/" 2>/dev/null || echo "   Directory not found!"
+            echo "   Check if {{ project_name_vcpkg }}Config.cmake was installed to ${install_dir}/lib/cmake/{{ project_name_vcpkg }}/"
+            ls -la "${install_dir}/lib/cmake/{{ project_name_vcpkg }}/" 2>/dev/null || echo "   Directory not found!"
             continue
         fi
         
