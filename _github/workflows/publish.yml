@@ -345,8 +345,46 @@ jobs:
           COMMIT_HASH=$(git rev-parse HEAD)
           echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
           echo "Registry commit hash: $COMMIT_HASH"
-          
-          git push https://x-access-token:${{ secrets.VCPKG_REGISTRY_TOKEN }}@github.com/ridgetradinggroup/vcpkg-ridge.git main
+
+          # Push with retry logic to handle concurrent workflow pushes
+          echo "🚀 Pushing changes to vcpkg-ridge registry..."
+          for push_attempt in {1..3}; do
+            echo "📤 Push attempt $push_attempt of 3..."
+
+            if git push https://x-access-token:${{ secrets.VCPKG_REGISTRY_TOKEN }}@github.com/ridgetradinggroup/vcpkg-ridge.git main; then
+              echo "✅ Successfully pushed registry changes on attempt $push_attempt"
+              break
+            else
+              echo "⚠️ Push rejected on attempt $push_attempt (remote has new changes)"
+
+              if [ $push_attempt -eq 3 ]; then
+                echo "::error::Push failed after 3 attempts"
+                echo "❌ ERROR: Unable to push registry changes after 3 retry attempts"
+                echo "This indicates persistent concurrent publishing conflicts"
+                exit 1
+              fi
+
+              # Fetch and rebase latest changes before retry
+              echo "🔄 Fetching latest changes and rebasing..."
+              git fetch origin main
+              if ! git rebase origin/main; then
+                echo "::error::Rebase failed during push retry"
+                echo "❌ ERROR: Automatic rebase failed - manual intervention required"
+                git rebase --abort
+                exit 1
+              fi
+
+              # Update commit hash after rebase
+              NEW_COMMIT_HASH=$(git rev-parse HEAD)
+              echo "COMMIT_HASH=$NEW_COMMIT_HASH" >> $GITHUB_ENV
+              echo "Updated commit hash after rebase: $NEW_COMMIT_HASH"
+
+              # Wait before retry
+              sleep_time=$((push_attempt * 10))
+              echo "⏳ Waiting ${sleep_time} seconds before push retry..."
+              sleep $sleep_time
+            fi
+          done
 
       - name: Test with actual private vcpkg registry
         timeout-minutes: 20
