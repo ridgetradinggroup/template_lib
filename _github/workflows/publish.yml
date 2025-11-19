@@ -284,44 +284,63 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Safely handle concurrent changes with conflict detection and retry logic
-          echo "🔄 Attempting to merge registry changes with retry logic..."
+          # Commit local changes first, then sync with remote using auto-stash pull
+          echo "🔄 Syncing registry changes using auto-stash pull approach..."
 
-          for attempt in {1..5}; do
-            echo "Attempt $attempt of 5..."
-            git fetch origin main
-
-            # Check for merge conflicts before attempting merge
-            if git merge --no-commit --no-ff origin/main; then
-              echo "✅ Successfully merged registry changes on attempt $attempt"
-              break
-            else
-              echo "⚠️ Merge conflict detected on attempt $attempt"
-              git merge --abort
-
-              if [ $attempt -eq 5 ]; then
-                echo "::error::Merge conflicts persist after 5 attempts"
-                echo "❌ ERROR: Registry merge failed after 5 retry attempts"
-                echo "This indicates persistent concurrent publishing conflicts"
-                exit 1
-              fi
-
-              # Exponential backoff: wait longer on each retry
-              sleep_time=$((attempt * 10))
-              echo "⏳ Waiting ${sleep_time} seconds before retry..."
-              sleep $sleep_time
-
-              # Reset to clean state for next attempt
-              git reset --hard HEAD
-            fi
-          done
-          
-          # Add both port files and version database changes
+          # Stage all generated changes (port files and version database)
           git add ports/$VCPKG_PACKAGE_NAME
           git add versions/
-          
-          git commit -m "Update $VCPKG_PACKAGE_NAME to version $TAG_VERSION"
-          
+
+          # Commit local changes first
+          git commit -m "Add $VCPKG_PACKAGE_NAME version $TAG_VERSION [automated]"
+          echo "✅ Committed local registry changes"
+
+          # Use git pull with auto-stash and rebase to handle conflicts gracefully
+          for attempt in {1..3}; do
+            echo "📥 Pull attempt $attempt of 3 using auto-stash rebase..."
+
+            if git pull --rebase --autostash origin main; then
+              echo "✅ Successfully synced with remote registry on attempt $attempt"
+              break
+            else
+              echo "⚠️ Auto-stash pull failed on attempt $attempt"
+
+              # Cleanup any partial rebase state
+              git rebase --abort 2>/dev/null || true
+
+              if [ $attempt -eq 3 ]; then
+                echo "::error::Auto-stash pull failed after 3 attempts"
+                echo "❌ Falling back to reset-regenerate strategy..."
+
+                # Fallback: Reset to remote state and regenerate
+                echo "🔄 Resetting to remote state and regenerating with latest baseline..."
+                git reset --hard origin/main
+
+                # Regenerate port files with potentially updated baseline
+                if ! python3 ../source_repo/.github/scripts/generate_port_files.py; then
+                  echo "::error::Port file regeneration failed"
+                  exit 1
+                fi
+
+                # Update registry version database again
+                vcpkg --x-builtin-ports-root=./ports \
+                      --x-builtin-registry-versions-dir=./versions \
+                      x-add-version --all --verbose
+
+                # Stage and commit regenerated changes
+                git add ports/$VCPKG_PACKAGE_NAME versions/
+                git commit -m "Add $VCPKG_PACKAGE_NAME version $TAG_VERSION [regenerated]"
+                echo "✅ Regenerated and committed with latest baseline"
+                break
+              fi
+
+              # Wait before retry
+              sleep_time=$((attempt * 15))
+              echo "⏳ Waiting ${sleep_time} seconds before retry..."
+              sleep $sleep_time
+            fi
+          done
+
           # Store commit hash for registry baseline
           COMMIT_HASH=$(git rev-parse HEAD)
           echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
