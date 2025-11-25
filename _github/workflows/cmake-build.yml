@@ -138,6 +138,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build gcc-12 g++-12 ccache
 
+          # Ensure compilers are available in PATH for CMake presets
+          # CMake presets use $env{CC} and $env{CXX} which need to resolve to valid executables
+          echo "Verifying compiler availability for CMake presets"
+
+          # Check if compilers are in PATH, if not create symlinks
+          if ! which ${CC} >/dev/null 2>&1; then
+            echo "Creating symlink for ${CC} in /usr/local/bin/"
+            sudo ln -sf /usr/bin/${CC} /usr/local/bin/${CC}
+          fi
+
+          if ! which ${CXX} >/dev/null 2>&1; then
+            echo "Creating symlink for ${CXX} in /usr/local/bin/"
+            sudo ln -sf /usr/bin/${CXX} /usr/local/bin/${CXX}
+          fi
+
+          # Verify compilers are now available
+          which ${CC} && echo "✅ ${CC} found in PATH"
+          which ${CXX} && echo "✅ ${CXX} found in PATH"
+
+          # Show compiler versions for debugging
+          ${CC} --version || true
+          ${CXX} --version || true
+
       # Cache vcpkg packages to speed up dependency installation
       # Uses content-based cache keys for vcpkg manifest files
       - name: Cache vcpkg Packages
@@ -191,6 +214,7 @@ jobs:
         uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
+          authorizationToken: ${{ secrets.VCPKG_REGISTRY_TOKEN }}
 
       # Reset ccache statistics to measure per-build performance
       # Only runs when ccache statistics reporting is enabled
@@ -233,6 +257,36 @@ jobs:
             echo "⚡ Testing disabled: BUILD_TESTING=OFF"
           fi
           
+          # ==============================================================================
+          # Compiler Override Strategy - Selective Injection Based on Preset Type
+          # ==============================================================================
+          #
+          # WHEN: Override compilers in these scenarios:
+          # 1. Traditional builds (no preset) - Always override for CI consistency
+          # 2. Environment-dependent presets (debug, release) - Override because they use $env{CC}/$env{CXX}
+          #
+          # WHEN NOT: Do NOT override for compiler-specific presets:
+          # - release-g++, release-clang++, release-icpc, release-icpx
+          # These presets explicitly set compilers and should not be overridden
+          #
+          # WHY: This approach maintains preset flexibility while ensuring CI gets correct compiler versions
+
+          if [[ -z "${{ inputs.cmake-preset }}" ]]; then
+            # Traditional CMake build: Always inject generator and compilers for CI consistency
+            echo "🔧 Traditional build: Injecting Ninja generator and CI compiler selection"
+            CMAKE_CONFIGURE_CMD="$CMAKE_CONFIGURE_CMD -G Ninja -DCMAKE_C_COMPILER=${CC} -DCMAKE_CXX_COMPILER=${CXX}"
+          elif [[ "${{ inputs.cmake-preset }}" =~ ^(debug|release)$ ]]; then
+            # Environment-dependent presets: Override because they rely on $env{CC}/$env{CXX}
+            echo "🔧 Environment preset '${{ inputs.cmake-preset }}': Injecting CI compiler selection"
+            echo "   Reason: This preset uses \$env{CC}/\$env{CXX} which need CI values"
+            CMAKE_CONFIGURE_CMD="$CMAKE_CONFIGURE_CMD -DCMAKE_C_COMPILER=${CC} -DCMAKE_CXX_COMPILER=${CXX}"
+          else
+            # Compiler-specific presets: Do NOT override - they set their own compilers explicitly
+            echo "🔧 Compiler-specific preset '${{ inputs.cmake-preset }}': Using preset's compiler choice"
+            echo "   Reason: This preset explicitly defines compilers and should not be overridden"
+            echo "   Preserving preset's compiler selection for testing multiple toolchains"
+          fi
+
           echo "🔧 Executing CMake configuration: $CMAKE_CONFIGURE_CMD"
           eval $CMAKE_CONFIGURE_CMD
 

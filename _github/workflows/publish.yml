@@ -36,11 +36,6 @@ on:
   release:
     types: [published]
 
-# Prevent concurrent publishing to vcpkg-ridge registry to avoid merge conflicts
-concurrency:
-  group: vcpkg-registry-publish
-  cancel-in-progress: false  # Queue workflows instead of cancelling them
-
 jobs:
   # ==============================================================================
   # Publish to Registry Job - Complete vcpkg Registry Publishing Pipeline
@@ -284,107 +279,30 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Commit local changes first, then sync with remote using auto-stash pull
-          echo "🔄 Syncing registry changes using auto-stash pull approach..."
-
-          # Stage all generated changes (port files and version database)
+          # Safely handle concurrent changes with conflict detection
+          git fetch origin main
+          
+          # Check for merge conflicts before attempting merge
+          if ! git merge --no-commit --no-ff origin/main; then
+            echo "::error::Merge conflicts detected with registry main branch"
+            echo "❌ ERROR: Merge conflicts detected with registry main branch"
+            echo "Manual intervention required to resolve conflicts"
+            git merge --abort
+            exit 1
+          fi
+          
+          # Add both port files and version database changes
           git add ports/$VCPKG_PACKAGE_NAME
           git add versions/
-
-          # Commit local changes first
-          git commit -m "Add $VCPKG_PACKAGE_NAME version $TAG_VERSION [automated]"
-          echo "✅ Committed local registry changes"
-
-          # Use git pull with auto-stash and rebase to handle conflicts gracefully
-          for attempt in {1..3}; do
-            echo "📥 Pull attempt $attempt of 3 using auto-stash rebase..."
-
-            if git pull --rebase --autostash origin main; then
-              echo "✅ Successfully synced with remote registry on attempt $attempt"
-              break
-            else
-              echo "⚠️ Auto-stash pull failed on attempt $attempt"
-
-              # Cleanup any partial rebase state
-              git rebase --abort 2>/dev/null || true
-
-              if [ $attempt -eq 3 ]; then
-                echo "::error::Auto-stash pull failed after 3 attempts"
-                echo "❌ Falling back to reset-regenerate strategy..."
-
-                # Fallback: Reset to remote state and regenerate
-                echo "🔄 Resetting to remote state and regenerating with latest baseline..."
-                git reset --hard origin/main
-
-                # Regenerate port files with potentially updated baseline
-                if ! python3 ../source_repo/.github/scripts/generate_port_files.py; then
-                  echo "::error::Port file regeneration failed"
-                  exit 1
-                fi
-
-                # Update registry version database again
-                vcpkg --x-builtin-ports-root=./ports \
-                      --x-builtin-registry-versions-dir=./versions \
-                      x-add-version --all --verbose
-
-                # Stage and commit regenerated changes
-                git add ports/$VCPKG_PACKAGE_NAME versions/
-                git commit -m "Add $VCPKG_PACKAGE_NAME version $TAG_VERSION [regenerated]"
-                echo "✅ Regenerated and committed with latest baseline"
-                break
-              fi
-
-              # Wait before retry
-              sleep_time=$((attempt * 15))
-              echo "⏳ Waiting ${sleep_time} seconds before retry..."
-              sleep $sleep_time
-            fi
-          done
-
+          
+          git commit -m "Update $VCPKG_PACKAGE_NAME to version $TAG_VERSION"
+          
           # Store commit hash for registry baseline
           COMMIT_HASH=$(git rev-parse HEAD)
           echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
           echo "Registry commit hash: $COMMIT_HASH"
-
-          # Push with retry logic to handle concurrent workflow pushes
-          echo "🚀 Pushing changes to vcpkg-ridge registry..."
-          for push_attempt in {1..3}; do
-            echo "📤 Push attempt $push_attempt of 3..."
-
-            if git push https://x-access-token:${{ secrets.VCPKG_REGISTRY_TOKEN }}@github.com/ridgetradinggroup/vcpkg-ridge.git main; then
-              echo "✅ Successfully pushed registry changes on attempt $push_attempt"
-              break
-            else
-              echo "⚠️ Push rejected on attempt $push_attempt (remote has new changes)"
-
-              if [ $push_attempt -eq 3 ]; then
-                echo "::error::Push failed after 3 attempts"
-                echo "❌ ERROR: Unable to push registry changes after 3 retry attempts"
-                echo "This indicates persistent concurrent publishing conflicts"
-                exit 1
-              fi
-
-              # Fetch and rebase latest changes before retry
-              echo "🔄 Fetching latest changes and rebasing..."
-              git fetch origin main
-              if ! git rebase origin/main; then
-                echo "::error::Rebase failed during push retry"
-                echo "❌ ERROR: Automatic rebase failed - manual intervention required"
-                git rebase --abort
-                exit 1
-              fi
-
-              # Update commit hash after rebase
-              NEW_COMMIT_HASH=$(git rev-parse HEAD)
-              echo "COMMIT_HASH=$NEW_COMMIT_HASH" >> $GITHUB_ENV
-              echo "Updated commit hash after rebase: $NEW_COMMIT_HASH"
-
-              # Wait before retry
-              sleep_time=$((push_attempt * 10))
-              echo "⏳ Waiting ${sleep_time} seconds before push retry..."
-              sleep $sleep_time
-            fi
-          done
+          
+          git push https://x-access-token:${{ secrets.VCPKG_REGISTRY_TOKEN }}@github.com/ridgetradinggroup/vcpkg-ridge.git main
 
       - name: Test with actual private vcpkg registry
         timeout-minutes: 20
@@ -404,29 +322,12 @@ jobs:
           cp -r source_extracted/tests/downstream final_registry_test
           cd final_registry_test
           
-          # Merge our private registry into existing vcpkg-configuration.json (preserve public registries)
-          if [ ! -f "vcpkg-configuration.json" ]; then
-            echo "::error::vcpkg-configuration.json not found in downstream test"
-            echo "❌ ERROR: Downstream test must have vcpkg-configuration.json for registry integration testing"
-            echo "Please ensure tests/downstream/ contains a proper vcpkg-configuration.json file"
-            exit 1
-          fi
-          
-          # Backup original and add our private registry to existing config
-          cp vcpkg-configuration.json vcpkg-configuration.json.bak
-          
-          echo "::group::Merge private registry into existing vcpkg configuration"
-          
-          # Use standalone Python script for merging vcpkg configuration
-          if ! python3 ../source_repo/.github/scripts/merge_vcpkg_config.py; then
-            echo "::error::Python vcpkg config merge script failed"
-            echo "::group::Current vcpkg-configuration.json content"
-            cat vcpkg-configuration.json || echo "File not readable"
-            echo "::endgroup::"
-            exit 1
-          fi
+          # Simple approach: downstream test already has correct registry configuration
+          # Just update baseline to use latest registry state (no merge needed)
+          echo "::group::Update vcpkg baseline to latest registry state"
+          vcpkg x-update-baseline --add-initial-baseline
           echo "::endgroup::"
-          
+
           # Test with actual private registry (not overlay ports)
           echo "Testing with published private vcpkg registry using project's tests/downstream..."
           echo "Debug: VCPKG_ROOT=${VCPKG_ROOT}"

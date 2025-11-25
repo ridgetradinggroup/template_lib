@@ -25,6 +25,10 @@ inputs:
     description: 'Directory path where vcpkg will be cloned and bootstrapped'
     required: true
     default: ${{ runner.temp }}/vcpkg
+  authorizationToken:
+    description: 'Authorization token for private vcpkg registry access'
+    required: false
+    default: ''
 
 runs:
   using: "composite"
@@ -49,6 +53,28 @@ runs:
           git clone https://github.com/Microsoft/vcpkg.git ${{ inputs.vcpkgDirectory }}
           echo "✅ vcpkg repository cloned successfully"
         fi
+
+    # Configure vcpkg authorization token for private registry access
+    # This sets up the AUTHORIZATION_TOKEN that portfiles use to access private repositories
+    - name: Configure vcpkg authorization token for private registries
+      if: inputs.authorizationToken != ''
+      shell: bash
+      run: |
+        # ==============================================================================
+        # Configure AUTHORIZATION_TOKEN for Private vcpkg Registry
+        # ==============================================================================
+        echo "🔐 Setting up AUTHORIZATION_TOKEN for private vcpkg registry access"
+
+        # Set the AUTHORIZATION_TOKEN environment variable that vcpkg portfiles expect
+        echo "AUTHORIZATION_TOKEN=${{ inputs.authorizationToken }}" >> $GITHUB_ENV
+
+        # Also export for immediate use in this shell session
+        export AUTHORIZATION_TOKEN="${{ inputs.authorizationToken }}"
+
+        # Also configure git credentials as backup for vcpkg registry access
+        git config --global url."https://x-access-token:${{ inputs.authorizationToken }}@github.com/".insteadOf "https://github.com/"
+
+        echo "✅ AUTHORIZATION_TOKEN configured for private registry access"
 
     # Bootstrap vcpkg for the target platform (Windows or Unix-like systems)
     # Uses appropriate bootstrap script based on runner operating system

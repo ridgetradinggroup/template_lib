@@ -78,6 +78,29 @@ NC='\033[0m' # No Color
 BUILD_TYPES=("Release" "Debug")
 LIBRARY_TYPES=("OFF" "ON")  # BUILD_SHARED_LIBS: OFF=static, ON=shared
 
+# Function to copy logs to standardized directory
+copy_logs_to_standard_dir() {
+    local test_name="$1"
+    local build_dir="$2"
+    local install_dir="$3"
+    
+    # Create standardized log directory
+    mkdir -p downstream-logs
+    
+    # Copy build logs if they exist
+    if [ -d "${build_dir}" ]; then
+        find "${build_dir}" -name "*.log" -exec cp {} downstream-logs/ \; 2>/dev/null || true
+    fi
+    
+    # Copy install logs if they exist  
+    if [ -d "${install_dir}" ]; then
+        find "${install_dir}" -name "*.log" -exec cp {} downstream-logs/ \; 2>/dev/null || true
+    fi
+    
+    # Log the copy operation
+    echo "   ✓ Logs copied to downstream-logs/ for ${test_name}"
+}
+
 # Function to generate vcpkg overlay for local testing
 generate_vcpkg_overlay() {
     local project_root="$1"
@@ -173,51 +196,39 @@ generate_downstream_vcpkg_config() {
     local project_root="$1"
     local downstream_dir="${project_root}/tests/downstream"
 
-    echo "Generating downstream vcpkg-configuration.json..."
+    echo "Checking main project vcpkg configuration..."
 
-    # Copy and adapt the main project's vcpkg-configuration.json
+    # Check if main project uses embedded configuration
     python3 -c "
 import json
 import sys
 
-# Read main project vcpkg-configuration.json
-with open('${project_root}/vcpkg-configuration.json', 'r') as f:
-    main_config = json.load(f)
+# Read main project vcpkg.json
+with open('${project_root}/vcpkg.json', 'r') as f:
+    main_manifest = json.load(f)
 
-# Use the same configuration for downstream test
-downstream_config = main_config.copy()
+# Check for embedded configuration (modern or legacy field names)
+if 'vcpkg-configuration' in main_manifest or 'configuration' in main_manifest:
+    print('Main project uses embedded configuration - downstream will inherit it')
+    sys.exit(0)
+else:
+    # No embedded config, need separate file
+    print('Main project has no embedded configuration - creating separate file')
+    downstream_config = {
+        'default-registry': {
+            'kind': 'git',
+            'baseline': 'cbb38f7824373004154d678b0eb54bff4e5466ea',
+            'repository': 'https://github.com/microsoft/vcpkg'
+        }
+    }
 
-# Write to downstream directory
-with open('${downstream_dir}/vcpkg-configuration.json', 'w') as f:
-    json.dump(downstream_config, f, indent=2)
-
-print('Generated downstream vcpkg-configuration.json')
+    # Write to downstream directory
+    with open('${downstream_dir}/vcpkg-configuration.json', 'w') as f:
+        json.dump(downstream_config, f, indent=2)
+    print('Generated downstream vcpkg-configuration.json fallback')
 "
 
-    echo "   ✓ Generated: ${downstream_dir}/vcpkg-configuration.json"
-}
-
-# Function to copy logs to standardized directory
-copy_logs_to_standard_dir() {
-    local test_name="$1"
-    local build_dir="$2"
-    local install_dir="$3"
-
-    # Create standardized log directory
-    mkdir -p downstream-logs
-
-    # Copy build logs if they exist
-    if [ -d "${build_dir}" ]; then
-        find "${build_dir}" -name "*.log" -exec cp {} downstream-logs/ \; 2>/dev/null || true
-    fi
-
-    # Copy install logs if they exist
-    if [ -d "${install_dir}" ]; then
-        find "${install_dir}" -name "*.log" -exec cp {} downstream-logs/ \; 2>/dev/null || true
-    fi
-
-    # Log the copy operation
-    echo "   ✓ Logs copied to downstream-logs/ for ${test_name}"
+    echo "   ✓ Configuration handling completed"
 }
 
 # Clean previous tests
@@ -294,11 +305,28 @@ for build_type in "${BUILD_TYPES[@]}"; do
             continue
         fi
         
-        # Step 4: Test downstream with installed version
-        echo "4. Configuring downstream project..."
+        # Step 4: Update vcpkg baseline to latest registry state
+        echo "4. Updating vcpkg baseline to latest registry state..."
+
+        # Copy downstream directory to avoid modifying the original
+        downstream_work_dir="${build_dir}/downstream-work"
+        rm -rf "${downstream_work_dir}"
+        cp -r tests/downstream "${downstream_work_dir}"
+
+        # Update baseline to use latest registry state
+        if (cd "${downstream_work_dir}" && vcpkg x-update-baseline --add-initial-baseline > /dev/null 2>&1); then
+            echo "   ✓ Baseline update successful"
+        else
+            echo -e "   ${RED}✗ Baseline update failed${NC}"
+            echo "   Registry may not be accessible or baseline is invalid"
+            continue
+        fi
+
+        # Step 5: Test downstream with installed version
+        echo "5. Configuring downstream project..."
         downstream_build_dir="${build_dir}/downstream-test"
-        
-        if cmake -S tests/downstream -B "${downstream_build_dir}" \
+
+        if cmake -S "${downstream_work_dir}" -B "${downstream_build_dir}" \
             -DCMAKE_PREFIX_PATH="${install_dir}" \
             -DCMAKE_BUILD_TYPE="${build_type}" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
@@ -310,18 +338,18 @@ for build_type in "${BUILD_TYPES[@]}"; do
             ls -la "${install_dir}/lib/cmake/{{ project_name_underscore }}/" 2>/dev/null || echo "   Directory not found!"
             continue
         fi
-        
-        # Step 5: Build downstream
-        echo "5. Building downstream project..."
+
+        # Step 6: Build downstream
+        echo "6. Building downstream project..."
         if cmake --build "${downstream_build_dir}" > /dev/null 2>&1; then
             echo "   ✓ Downstream build successful"
         else
             echo -e "   ${RED}✗ Downstream build failed${NC}"
             continue
         fi
-        
-        # Step 6: Run the downstream test
-        echo "6. Running downstream executable..."
+
+        # Step 7: Run the downstream test
+        echo "7. Running downstream executable..."
         
         # Set library path for shared libraries
         if [ "$lib_type" == "ON" ]; then
