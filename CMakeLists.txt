@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
-project({{ project_name }} VERSION 1.0.0 LANGUAGES CXX)
+
+# Read version from vcpkg.json as single source of truth
+file(READ "${CMAKE_SOURCE_DIR}/vcpkg.json" VCPKG_JSON)
+string(JSON PROJECT_VERSION GET ${VCPKG_JSON} version)
+
+project({{ project_name }} VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
 # Option to build shared or static libraries - defaults to OFF (static)
 option(BUILD_SHARED_LIBS "Build {{ project_name }} as a shared library" OFF)
@@ -116,13 +121,16 @@ endif()
 # Testing Support
 #
 #-------------------------------------------------------------------------------
-include(CTest)
-option(BUILD_TESTING "Build the testing tree" ON)
+# Only enable testing if this is the main project (not a subproject)
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(CTest)
+    option(BUILD_TESTING "Build the testing tree" OFF)
 
-if(BUILD_TESTING)
-    enable_testing()
-    # Add unit tests
-    add_subdirectory(tests/unit)
+    if(BUILD_TESTING)
+        enable_testing()
+        # Add unit tests
+        add_subdirectory(tests/unit)
+    endif()
 endif()
 
 #-------------------------------------------------------------------------------

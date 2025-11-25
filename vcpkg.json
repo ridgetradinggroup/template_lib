@@ -2,6 +2,31 @@
   "name": "{{ project_name_vcpkg }}",
   "version": "1.0.0",
   "description": "{{ project_name }} library",
+  "dependencies": [],
+  "vcpkg-configuration": {
+    "default-registry": {
+      "kind": "git",
+      "baseline": "1d611efb49276c65d69fb6d010c2aaaf039322b0",
+      "repository": "https://github.com/microsoft/vcpkg"
+    },
+    "registries": [
+      {
+        "kind": "git",
+        "baseline": "6c5ece94ba5a3aafa79aafe85b7b77b893ed86f5",
+        "repository": "https://github.com/ridgetradinggroup/vcpkg-ridge",
+        "packages": [
+          "chronos-common",
+          "etf-strategy",
+          "etn-strategy"
+        ]
+      },
+      {
+        "kind": "artifact",
+        "location": "https://github.com/microsoft/vcpkg-ce-catalog/archive/refs/heads/main.zip",
+        "name": "microsoft"
+      }
+    ]
+  },
   "features": {
     "test": {
       "description": "Dependencies for running tests",
