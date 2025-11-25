@@ -361,6 +361,7 @@ jobs:
         uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
+          authorizationToken: ${{ secrets.VCPKG_REGISTRY_TOKEN }}
 
       # Execute comprehensive downstream compatibility tests
       # Tests all 8 configurations: Debug/Release × Static/Shared × 2 build types

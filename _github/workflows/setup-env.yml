@@ -173,6 +173,7 @@ jobs:
         uses: ./.github/actions/setup-vcpkg
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
+          authorizationToken: ${{ secrets.VCPKG_REGISTRY_TOKEN }}
 
       - name: Export vcpkg Root Path
         if: inputs.install-vcpkg == true
